@@ -1,86 +1,53 @@
 ---
 name: ghd
-description: Use this skill when the user wants AI agents to have a discussion or conversation on a GitHub issue. This includes coordinating between Claude Code and Codex (or other agents), posting comments as a specific agent identity with a role, reading discussion threads, waiting/polling for replies from other agents, and managing multi-agent discussion sessions. Triggers on "discuss on GitHub", "agent conversation", "ghd", "talk to codex/claude on an issue", "start a discussion", or any multi-agent GitHub issue collaboration.
+description: GitHub Discussion CLI for AI agents. Turn-based conversations on GitHub issues between Claude Code, Codex, and other agents.
 ---
 
-# ghd - GitHub Discussion CLI for AI Agents
+# ghd
 
-A CLI tool that enables AI agents to conduct turn-based discussions on GitHub issues with automatic comment posting, polling, and role identification.
-
-## Prerequisites
-
-- `gh` CLI authenticated (`gh auth status`)
-- `bun` runtime installed
-- `ghd` installed globally (`cd <ghd-repo> && bun install && bun link`)
+CLI tool for AI agents to conduct discussions on GitHub issues with role identification.
 
 ## Commands
 
-### Start a session
-
 ```bash
-ghd start --repo <owner/repo> --issue <number> --as <agent-name> --role "<role description>"
-```
-
-The `--role` flag is optional but recommended. It adds a visible role header to every comment posted:
-
-```markdown
-> **claude** · Senior Backend Engineer
-
-Your message here...
-```
-
-### Read comments
-
-```bash
-ghd read              # all comments
-ghd read --last 3     # last 3 comments
-```
-
-### Post a comment
-
-```bash
-ghd post --message "Your message here"
-echo "piped content" | ghd post        # stdin supported
-```
-
-### Wait for a reply (blocking)
-
-```bash
-ghd wait                            # default: 300s timeout, 10s interval
-ghd wait --timeout 600 --interval 5 # custom
-```
-
-Blocks until another agent posts a new comment. Returns the reply in plain text:
-
-```
-codex (Frontend Architect) replied: https://github.com/owner/repo/issues/1#issuecomment-123
-The actual reply content here...
-```
-
-### Check status
-
-```bash
+ghd start --repo <owner/repo> --issue <number> --as <name> [--role "<role>"]
+ghd post --message "your message"       # also: echo "msg" | ghd post
+ghd wait [--timeout 300] [--interval 10] # blocks until another agent replies
+ghd read [--last N]
 ghd status
-```
-
-### End session
-
-```bash
 ghd end
 ```
 
-## Typical Workflow for Multi-Agent Discussion
+## Workflow
 
-1. Start session: `ghd start --repo owner/repo --issue 42 --as claude --role "Backend Engineer"`
-2. Post your analysis: `ghd post --message "I propose we refactor..."`
-3. Wait for the other agent: `ghd wait --timeout 300`
-4. Read the reply and continue the conversation
-5. End when done: `ghd end`
+1. `ghd start --repo owner/repo --issue 42 --as claude --role "Backend Engineer"`
+2. `ghd post --message "I propose..."`
+3. `ghd wait` — blocks, returns when the other agent replies:
+   ```
+   codex (Frontend Architect) replied: https://github.com/.../issues/42#issuecomment-123
+   The reply content...
+   ```
+4. Continue posting and waiting in turns
+5. `ghd end` when done
 
-## Agent Identification
+## Agent Identity
 
-Each comment includes a hidden HTML tag `<!-- ghd:agent:name role:Role -->` for machine parsing. The visible blockquote header `> **name** · Role` renders on GitHub for human readability. Both are automatically stripped when reading via `ghd read` or `ghd wait`.
+Each comment includes:
+- Hidden metadata: `<!-- ghd:agent:claude role:Backend Engineer -->`
+- Visible header: `> **claude** · Backend Engineer`
 
-## Session State
+Both are automatically stripped when reading via `ghd read` / `ghd wait`.
 
-Session is stored at `~/.ghd/active.json` (single active session). Starting a new session requires ending the current one first.
+## Session
+
+Single active session stored at `~/.ghd/active.json`. Must `ghd end` before starting a new one.
+
+## Troubleshooting
+
+If `ghd` is not found, install globally:
+
+```bash
+bun install -g github:ethan-huo/ghd
+```
+
+Requires `gh` CLI authenticated (`gh auth status`).
