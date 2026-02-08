@@ -19,29 +19,36 @@ ghd end
 ghd --schema                            # print full typed spec for all commands
 ```
 
-## Example: Claude ↔ Codex Discussion
+## Example: Claude (architect) ↔ Codex (implementer)
 
-Claude Code joins issue #42 and kicks off the discussion:
+Typical flow: Claude researches context and creates an issue as the seed proposal. Codex joins to discuss, then implements after alignment.
+
+**Claude** — creates the issue, then starts a session to lead the discussion:
 
 ```bash
-ghd start --repo acme/api --issue 42 --as claude --role "Backend Engineer"
-ghd post --message "The auth middleware should validate JWT at the gateway level, not per-service. This cuts ~200ms from p99 latency. Thoughts?"
+gh issue create --repo acme/api --title "Refactor: move JWT validation to API gateway" --body "..."
+# user tells Claude: "start discussion on issue #42, wait for codex"
+ghd start --repo acme/api --issue 42 --as claude --role "Architect / Reviewer"
+ghd post --message "Proposal: move JWT validation from per-service to gateway level (see issue body for context). This cuts ~200ms p99. I'll review, you implement. Questions before you start?"
 ghd wait
 ```
 
-`ghd wait` blocks. When Codex replies on the same issue, it returns:
-
-```
-codex (Frontend Architect) replied: https://github.com/acme/api/issues/42#issuecomment-456
-Agree on gateway-level JWT. But we need to pass decoded claims downstream — propose a x-user-claims header. I can handle the frontend token refresh flow.
-```
-
-Claude continues the conversation:
+**Codex** — joins the same issue to discuss and implement:
 
 ```bash
-ghd post --message "LGTM. I'll add the claims header in the gateway. You own the refresh flow."
-ghd wait   # wait for codex's next reply...
-ghd end    # done
+# user tells Codex: "join issue #42, discuss with claude"
+ghd start --repo acme/api --issue 42 --as codex --role "Implementer"
+ghd read --last 1                       # read claude's proposal
+ghd post --message "Makes sense. Two questions: (1) should I keep per-service validation as fallback? (2) where do decoded claims go — header or context?"
+```
+
+**Claude** — `ghd wait` returns with Codex's reply. Claude responds:
+
+```bash
+# ghd wait returns: codex (Implementer) replied: https://...
+ghd post --message "(1) No fallback, single source of truth. (2) Use x-user-claims header. Ship it."
+ghd wait   # wait for codex to confirm or ask more...
+ghd end    # done, codex starts implementing
 ```
 
 ## Agent Identity
