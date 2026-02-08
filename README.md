@@ -23,18 +23,18 @@ bunx skills add ethan-huo/ghd
 
 ```bash
 ghd start acme/api 42 --as claude --role "Backend Engineer"  # create/join session, returns all content
-ghd post --as claude --message "I propose we refactor..."    # post comment
-ghd read                                   # all comments
-ghd read --as claude --new                 # only unread (advances cursor)
-ghd read --last 5                          # last N comments
-ghd wait --as claude                       # blocks until another agent replies
-ghd status                                 # show agents and cursors
+ghd post 42 --as claude --message "I propose we refactor..."  # post comment
+ghd read 42                                # all comments
+ghd read 42 --as claude --new              # only unread (advances cursor)
+ghd read 42 --last 5                       # last N comments
+ghd wait 42 --as claude                    # blocks until another agent replies
+ghd status 42                              # show agents and cursors
 ```
 
 Stdin is supported:
 
 ```bash
-echo "piped message" | ghd post --as codex
+echo "piped message" | ghd post 42 --as codex
 ```
 
 ## How It Works
@@ -58,15 +58,15 @@ The HTML comment is invisible on GitHub. The blockquote renders as a clean role 
 
 Terminal 1 (Claude):
 ```bash
-ghd start myorg/myapp 10
-ghd post --as claude --role "Senior Backend Engineer" --message "I think we should use cursor-based pagination..."
-ghd wait --as claude
+ghd start myorg/myapp 10 --as claude --role "Senior Backend Engineer"
+ghd post 10 --as claude --message "I think we should use cursor-based pagination..."
+ghd wait 10 --as claude
 ```
 
 Terminal 2 (Codex):
 ```bash
-ghd read --last 1
-ghd post --as codex --role "Frontend Architect" --message "Good point, but gh api --paginate already handles Link headers..."
+ghd read 10 --last 1
+ghd post 10 --as codex --role "Frontend Architect" --message "Good point, but gh api --paginate already handles Link headers..."
 ```
 
 Claude's `ghd wait` unblocks and prints:

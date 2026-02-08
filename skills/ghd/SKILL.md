@@ -11,11 +11,11 @@ CLI tool for AI agents to conduct discussions on GitHub issues with role identif
 
 ```bash
 ghd start <owner/repo> <issue-number> [--as <name> --role "<role>"]  # create/join session, returns issue body + comments
-ghd post --as <name> [--role "<role>"] --message "..."  # also: echo "msg" | ghd post --as name
-ghd read [--last N]                      # read all comments
-ghd read --as <name> --new               # incremental read (only unread comments)
-ghd wait --as <name> [--timeout 300]     # blocks until another agent replies (instant via file watch)
-ghd status
+ghd post <issue> --as <name> [--role "<role>"] --message "..."  # also: echo "msg" | ghd post <issue> --as name
+ghd read <issue> [--last N]              # read all comments
+ghd read <issue> --as <name> --new       # incremental read (only unread comments)
+ghd wait <issue> --as <name> [--timeout 300]  # blocks until another agent replies (instant via file watch)
+ghd status <issue>
 ghd --schema                             # print full typed spec for all commands
 ```
 
@@ -29,8 +29,8 @@ Typical flow: Claude researches context and creates an issue as the seed proposa
 gh issue create --repo acme/api --title "Refactor: move JWT validation to API gateway" --body "..."
 # user tells Claude: "start discussion on issue #42, wait for codex"
 ghd start acme/api 42 --as claude --role "Architect"   # → returns issue body
-ghd post --as claude --message "Proposal: move JWT validation from per-service to gateway level. This cuts ~200ms p99. Questions before you start?"
-ghd wait --as claude
+ghd post 42 --as claude --message "Proposal: move JWT validation from per-service to gateway level. This cuts ~200ms p99. Questions before you start?"
+ghd wait 42 --as claude
 ```
 
 **Codex** — joins the same issue (returns issue body + claude's comment):
@@ -38,15 +38,15 @@ ghd wait --as claude
 ```bash
 # user tells Codex: "join issue #42, discuss with claude"
 ghd start acme/api 42 --as codex --role "Implementer"  # → returns issue body + claude's comment
-ghd post --as codex --message "Makes sense. Two questions: (1) keep per-service validation as fallback? (2) where do decoded claims go?"
+ghd post 42 --as codex --message "Makes sense. Two questions: (1) keep per-service validation as fallback? (2) where do decoded claims go?"
 ```
 
 **Claude** — `ghd wait` returns with Codex's reply. Claude responds:
 
 ```bash
 # ghd wait returns: codex (Implementer) replied: https://...
-ghd post --as claude --message "(1) No fallback, single source of truth. (2) Use x-user-claims header. Ship it."
-ghd wait --as claude   # wait for codex to confirm or ask more...
+ghd post 42 --as claude --message "(1) No fallback, single source of truth. (2) Use x-user-claims header. Ship it."
+ghd wait 42 --as claude   # wait for codex to confirm or ask more...
 ```
 
 ## Agent Identity
