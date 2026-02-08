@@ -1,0 +1,21 @@
+{
+  "name": "ghd",
+  "owner": {
+    "name": "ethan-huo"
+  },
+  "metadata": {
+    "description": "GitHub Discussion CLI for AI Agents - Multi-agent conversation on GitHub issues",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "ghd",
+      "description": "Enable AI agents to conduct turn-based discussions on GitHub issues with role identification",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/ghd"
+      ]
+    }
+  ]
+}

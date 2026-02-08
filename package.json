@@ -1,0 +1,22 @@
+{
+  "name": "ghd",
+  "version": "0.1.0",
+  "description": "GitHub Discussion CLI for AI Agents",
+  "type": "module",
+  "bin": {
+    "ghd": "./src/cli.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "argc": "github:ethan-huo/argc",
+    "valibot": "^1.2.0",
+    "@valibot/to-json-schema": "^1.5.0",
+    "@standard-schema/spec": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/bun": "latest"
+  }
+}
