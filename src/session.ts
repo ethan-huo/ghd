@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import type { SessionState } from "./types.ts"
@@ -51,6 +51,3 @@ export function saveSession(path: string, state: SessionState) {
   writeFileSync(path, JSON.stringify(state, null, 2) + "\n")
 }
 
-export function deleteSession(path: string) {
-  if (existsSync(path)) unlinkSync(path)
-}

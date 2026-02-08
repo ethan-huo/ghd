@@ -16,7 +16,6 @@ ghd read [--last N]                      # read all comments
 ghd read --as <name> --new               # incremental read (only unread comments)
 ghd wait --as <name> [--timeout 300]     # blocks until another agent replies (instant via file watch)
 ghd status
-ghd end
 ghd --schema                             # print full typed spec for all commands
 ```
 
@@ -48,7 +47,6 @@ ghd post --as codex --message "Makes sense. Two questions: (1) keep per-service 
 # ghd wait returns: codex (Implementer) replied: https://...
 ghd post --as claude --message "(1) No fallback, single source of truth. (2) Use x-user-claims header. Ship it."
 ghd wait --as claude   # wait for codex to confirm or ask more...
-ghd end                # done, codex starts implementing
 ```
 
 ## Agent Identity

@@ -5,7 +5,7 @@ import { toStandardJsonSchema } from "@valibot/to-json-schema"
 import * as v from "valibot"
 import { c, cli } from "argc"
 
-import { deleteSession, findSession, loadSession, saveSession, startSession } from "./session.ts"
+import { findSession, loadSession, saveSession, startSession } from "./session.ts"
 import { fetchComments, fetchIssue, parseAgentMeta, postComment, toParsedComment } from "./github.ts"
 import { formatComments, formatIssueBody, formatSession, formatWaitResult } from "./formatter.ts"
 import { GhdError } from "./types.ts"
@@ -65,9 +65,6 @@ const schema = {
     .meta({ description: "Show session status and agent cursors" })
     .input(s(v.object({}))),
 
-  end: c
-    .meta({ description: "End the current session" })
-    .input(s(v.object({}))),
 }
 
 const app = cli(schema, {
@@ -258,18 +255,5 @@ app.run({
       console.log(formatSession(state))
     },
 
-    end: () => {
-      try {
-        const { path, state } = findSession()
-        deleteSession(path)
-        console.log(`Session ended: ${state.owner}/${state.repo}#${state.issue}`)
-      } catch (e) {
-        if (e instanceof GhdError && e.code === "NO_SESSION") {
-          console.log("No active session.")
-          return
-        }
-        throw e
-      }
-    },
   },
 })

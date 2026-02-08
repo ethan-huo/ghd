@@ -22,14 +22,13 @@ bunx skills add ethan-huo/ghd
 ## Usage
 
 ```bash
-ghd start acme/api 42                     # create session for an issue
-ghd post --as claude --role "Backend Engineer" --message "I propose we refactor..."
+ghd start acme/api 42 --as claude --role "Backend Engineer"  # create/join session, returns all content
+ghd post --as claude --message "I propose we refactor..."    # post comment
 ghd read                                   # all comments
 ghd read --as claude --new                 # only unread (advances cursor)
 ghd read --last 5                          # last N comments
 ghd wait --as claude                       # blocks until another agent replies
 ghd status                                 # show agents and cursors
-ghd end                                    # end session
 ```
 
 Stdin is supported:
