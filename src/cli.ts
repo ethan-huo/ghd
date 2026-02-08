@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
 
+import { watch } from "node:fs"
 import { toStandardJsonSchema } from "@valibot/to-json-schema"
 import * as v from "valibot"
-import { c, cli, group } from "argc"
+import { c, cli } from "argc"
 
-import { deleteSession, hasActiveSession, loadSession, saveSession, updateLastSeen } from "./session.ts"
-import { fetchComments, parseComments, pollForNewComments, postComment, validateIssue } from "./github.ts"
-import { formatComments, formatError, formatSession, formatWaitResult } from "./formatter.ts"
-import type { SessionState } from "./types.ts"
+import { createSession, deleteSession, findSession, loadSession, saveSession } from "./session.ts"
+import { fetchComments, parseAgentMeta, postComment, toParsedComment, validateIssue } from "./github.ts"
+import { formatComments, formatSession, formatWaitResult } from "./formatter.ts"
 import { GhdError } from "./types.ts"
 
 const s = toStandardJsonSchema
@@ -15,50 +15,52 @@ const s = toStandardJsonSchema
 const schema = {
   start: c
     .meta({
-      description: "Start a discussion session on a GitHub issue",
-      examples: [
-        "ghd start --repo owner/repo --issue 42 --as claude --role 'Senior Backend Engineer'",
-        "ghd start --repo anthropics/claude-code --issue 100 --as codex",
-      ],
+      description: "Create a discussion session for a GitHub issue",
+      examples: ["ghd start acme/api 42"],
     })
+    .args("repo", "issue")
     .input(s(v.object({
       repo: v.pipe(v.string(), v.regex(/^[^/]+\/[^/]+$/, "Must be owner/repo format")),
-      issue: v.pipe(v.number(), v.minValue(1)),
-      as: v.pipe(v.string(), v.minLength(1), v.description("Agent name identifier")),
-      role: v.optional(v.pipe(v.string(), v.minLength(1), v.description("Agent role, visible in comment header"))),
-    }))),
-
-  read: c
-    .meta({
-      description: "Read comments from the current discussion",
-    })
-    .input(s(v.object({
-      last: v.optional(v.pipe(v.number(), v.minValue(1)), undefined),
+      issue: v.pipe(v.string(), v.transform(Number), v.number(), v.minValue(1)),
     }))),
 
   post: c
     .meta({
-      description: "Post a comment to the current discussion (supports stdin: echo 'msg' | ghd post)",
+      description: "Post a comment (supports stdin: echo 'msg' | ghd post --as name)",
       examples: [
-        'ghd post --message "Hello from claude"',
-        'echo "piped message" | ghd post',
+        'ghd post --as claude --role "Architect" --message "Proposal: ..."',
+        'echo "msg" | ghd post --as codex',
       ],
     })
     .input(s(v.object({
+      as: v.pipe(v.string(), v.minLength(1), v.description("Agent name")),
+      role: v.optional(v.pipe(v.string(), v.minLength(1), v.description("Agent role, visible in comment header"))),
       message: v.optional(v.string()),
+    }))),
+
+  read: c
+    .meta({
+      description: "Read comments from the discussion",
+      examples: ["ghd read", "ghd read --last 5", 'ghd read --as claude --new'],
+    })
+    .input(s(v.object({
+      as: v.optional(v.string()),
+      new: v.optional(v.boolean(), false),
+      last: v.optional(v.pipe(v.number(), v.minValue(1))),
     }))),
 
   wait: c
     .meta({
-      description: "Block until a new reply appears from another agent",
+      description: "Block until another agent replies (instant via file watch)",
+      examples: ["ghd wait --as claude", "ghd wait --as claude --timeout 60"],
     })
     .input(s(v.object({
+      as: v.pipe(v.string(), v.minLength(1), v.description("Your agent name")),
       timeout: v.optional(v.pipe(v.number(), v.minValue(1)), 300),
-      interval: v.optional(v.pipe(v.number(), v.minValue(1)), 10),
     }))),
 
   status: c
-    .meta({ description: "Show current session status" })
+    .meta({ description: "Show session status and agent cursors" })
     .input(s(v.object({}))),
 
   end: c
@@ -68,112 +70,178 @@ const schema = {
 
 const app = cli(schema, {
   name: "ghd",
-  version: "0.1.0",
+  version: "0.2.0",
   description: "GitHub Discussion CLI for AI Agents",
 })
 
 app.run({
   handlers: {
     start: async ({ input }) => {
-      if (hasActiveSession()) {
-        const existing = loadSession()
-        throw new GhdError(
-          "SESSION_EXISTS",
-          `Session already active: ${existing.owner}/${existing.repo}#${existing.issueNumber}. Run \`ghd end\` first.`,
-        )
-      }
-
       const [owner, repo] = input.repo.split("/")
       await validateIssue(owner, repo, input.issue)
-
-      // Fetch existing comments to set lastSeen to the latest
-      const tempSession: SessionState = {
-        owner,
-        repo,
-        issueNumber: input.issue,
-        agentName: input.as,
-        agentRole: input.role ?? null,
-        lastSeenCommentId: null,
-        lastSeenAt: null,
-        startedAt: new Date().toISOString(),
-      }
-
-      const comments = await fetchComments(tempSession)
-      if (comments.length > 0) {
-        const last = comments[comments.length - 1]
-        tempSession.lastSeenCommentId = last.id
-        tempSession.lastSeenAt = last.created_at
-      }
-
-      saveSession(tempSession)
-      const rolePart = input.role ? ` (${input.role})` : ""
-      console.log(`Session started: ${owner}/${repo}#${input.issue} as @${input.as}${rolePart}`)
-      console.log(`Tracking from comment #${tempSession.lastSeenCommentId ?? "beginning"}`)
-    },
-
-    read: async ({ input }) => {
-      const session = loadSession()
-      const comments = await fetchComments(session)
-      let parsed = parseComments(comments, session.lastSeenCommentId)
-
-      if (input.last !== undefined) {
-        parsed = parsed.slice(-input.last)
-      }
-
-      console.log(formatComments(parsed))
-
-      // Update last seen
-      if (parsed.length > 0) {
-        const last = parsed[parsed.length - 1]
-        updateLastSeen(last.id, last.createdAt)
-      }
+      createSession(owner, repo, input.issue)
+      console.log(`Session created: ${owner}/${repo}#${input.issue}`)
     },
 
     post: async ({ input }) => {
-      const session = loadSession()
+      const { path, state } = findSession()
+
+      // Register or update agent
+      if (!state.agents[input.as]) {
+        state.agents[input.as] = { role: input.role ?? null, cursor: null }
+      } else if (input.role) {
+        state.agents[input.as].role = input.role
+      }
 
       let message = input.message
-      // Read from stdin if no message provided
       if (!message) {
-        const stdin = await Bun.stdin.text()
-        message = stdin.trim()
+        message = (await Bun.stdin.text()).trim()
       }
       if (!message) {
-        throw new GhdError("INVALID_ARGS", "No message provided. Pass --message or pipe via stdin.")
+        throw new GhdError("INVALID_ARGS", "No message. Pass --message or pipe via stdin.")
       }
 
-      const comment = await postComment(session, message)
-      updateLastSeen(comment.id, comment.created_at)
+      const comment = await postComment(
+        state.owner, state.repo, state.issue,
+        input.as, state.agents[input.as].role, message,
+      )
+
+      state.agents[input.as].cursor = comment.id
+      saveSession(path, state)
+
       console.log(`Posted: ${comment.html_url}`)
     },
 
+    read: async ({ input }) => {
+      const { path, state } = findSession()
+
+      if (input["new"] && !input.as) {
+        throw new GhdError("INVALID_ARGS", "--new requires --as <agent-name>")
+      }
+
+      const comments = await fetchComments(state.owner, state.repo, state.issue)
+
+      if (input["new"] && input.as) {
+        // Auto-register agent
+        if (!state.agents[input.as]) {
+          state.agents[input.as] = { role: null, cursor: null }
+        }
+        const cursor = state.agents[input.as].cursor
+        const parsed = comments
+          .filter((c) => c.id > (cursor ?? 0))
+          .map((c) => toParsedComment(c, true))
+
+        console.log(formatComments(parsed))
+
+        // Advance cursor
+        if (parsed.length > 0) {
+          state.agents[input.as].cursor = parsed[parsed.length - 1].id
+          saveSession(path, state)
+        }
+      } else {
+        let parsed = comments.map((c) => toParsedComment(c, false))
+        if (input.last !== undefined) {
+          parsed = parsed.slice(-input.last)
+        }
+        console.log(formatComments(parsed))
+      }
+    },
+
     wait: async ({ input }) => {
-      const session = loadSession()
-      console.error(`Waiting for new reply (timeout: ${input.timeout}s, interval: ${input.interval}s)...`)
+      const { path: sessionPath, state } = findSession()
+      const agentName = input.as
 
-      const newComments = await pollForNewComments(session, input.timeout, input.interval)
+      // Auto-register agent
+      if (!state.agents[agentName]) {
+        state.agents[agentName] = { role: null, cursor: null }
+        saveSession(sessionPath, state)
+      }
 
-      // Update last seen to the latest new comment
-      const last = newComments[newComments.length - 1]
-      updateLastSeen(last.id, last.createdAt)
+      const myCursor = state.agents[agentName].cursor
+      // Snapshot other agents' cursors for comparison
+      const snapshot = Object.fromEntries(
+        Object.entries(state.agents).map(([k, v]) => [k, v.cursor]),
+      )
 
-      // Output in agent-friendly format to stdout
-      console.log(formatWaitResult(newComments))
+      function hasOtherCursorChanged(current: typeof state): boolean {
+        return Object.entries(current.agents).some(([name, a]) => {
+          if (name === agentName) return false
+          return a.cursor !== (snapshot[name] ?? null)
+        })
+      }
+
+      // Start watcher first, then check immediately (no race condition)
+      const fresh = loadSession(sessionPath)
+      if (!hasOtherCursorChanged(fresh)) {
+        console.error(`Waiting for reply (timeout: ${input.timeout}s)...`)
+
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            watcher.close()
+            reject(new GhdError("TIMEOUT", `Timed out after ${input.timeout}s waiting for reply.`))
+          }, input.timeout * 1000)
+
+          let checking = false
+          const watcher = watch(sessionPath, () => {
+            if (checking) return
+            checking = true
+            try {
+              const current = loadSession(sessionPath)
+              if (hasOtherCursorChanged(current)) {
+                watcher.close()
+                clearTimeout(timer)
+                resolve()
+              }
+            } catch { /* file mid-write, ignore */ }
+            finally { checking = false }
+          })
+
+          // Re-check immediately after watcher setup
+          try {
+            const recheck = loadSession(sessionPath)
+            if (hasOtherCursorChanged(recheck)) {
+              watcher.close()
+              clearTimeout(timer)
+              resolve()
+            }
+          } catch { /* ignore */ }
+        })
+      }
+
+      // Fetch new comments from API (one call)
+      const comments = await fetchComments(state.owner, state.repo, state.issue)
+      const newComments = comments
+        .filter((c) => c.id > (myCursor ?? 0))
+        .filter((c) => parseAgentMeta(c.body)?.name !== agentName)
+        .map((c) => toParsedComment(c, true))
+
+      if (newComments.length > 0) {
+        // Update cursor
+        const latest = loadSession(sessionPath)
+        latest.agents[agentName].cursor = newComments[newComments.length - 1].id
+        saveSession(sessionPath, latest)
+
+        console.log(formatWaitResult(newComments))
+      }
     },
 
     status: () => {
-      const session = loadSession()
-      console.log(formatSession(session))
+      const { state } = findSession()
+      console.log(formatSession(state))
     },
 
     end: () => {
-      if (!hasActiveSession()) {
-        console.log("No active session.")
-        return
+      try {
+        const { path, state } = findSession()
+        deleteSession(path)
+        console.log(`Session ended: ${state.owner}/${state.repo}#${state.issue}`)
+      } catch (e) {
+        if (e instanceof GhdError && e.code === "NO_SESSION") {
+          console.log("No active session.")
+          return
+        }
+        throw e
       }
-      const session = loadSession()
-      deleteSession()
-      console.log(`Session ended: ${session.owner}/${session.repo}#${session.issueNumber}`)
     },
   },
 })

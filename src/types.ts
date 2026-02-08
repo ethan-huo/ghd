@@ -1,12 +1,14 @@
+export type AgentState = {
+  role: string | null
+  cursor: number | null
+}
+
 export type SessionState = {
   owner: string
   repo: string
-  issueNumber: number
-  agentName: string
-  agentRole: string | null
-  lastSeenCommentId: number | null
-  lastSeenAt: string | null
-  startedAt: string
+  issue: number
+  agents: Record<string, AgentState>
+  createdAt: string
 }
 
 export type GitHubComment = {

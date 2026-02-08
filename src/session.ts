@@ -1,11 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import type { SessionState } from "./types.ts"
 import { GhdError } from "./types.ts"
 
 const GHD_DIR = join(homedir(), ".ghd")
-const SESSION_FILE = join(GHD_DIR, "active.json")
 
 function ensureDir() {
   if (!existsSync(GHD_DIR)) {
@@ -13,31 +12,45 @@ function ensureDir() {
   }
 }
 
-export function hasActiveSession(): boolean {
-  return existsSync(SESSION_FILE)
+function sessionFileName(owner: string, repo: string, issue: number): string {
+  return `${owner}-${repo}-${issue}.json`
 }
 
-export function loadSession(): SessionState {
-  if (!existsSync(SESSION_FILE)) {
+export function createSession(owner: string, repo: string, issue: number): string {
+  ensureDir()
+  const path = join(GHD_DIR, sessionFileName(owner, repo, issue))
+  if (existsSync(path)) {
+    throw new GhdError("SESSION_EXISTS", `Session already exists for ${owner}/${repo}#${issue}. Run \`ghd end\` first.`)
+  }
+  const state: SessionState = {
+    owner,
+    repo,
+    issue,
+    agents: {},
+    createdAt: new Date().toISOString(),
+  }
+  writeFileSync(path, JSON.stringify(state, null, 2) + "\n")
+  return path
+}
+
+export function findSession(): { path: string; state: SessionState } {
+  ensureDir()
+  const files = readdirSync(GHD_DIR).filter((f) => f.endsWith(".json"))
+  if (files.length === 0) {
     throw new GhdError("NO_SESSION", "No active session. Run `ghd start` first.")
   }
-  return JSON.parse(readFileSync(SESSION_FILE, "utf-8")) as SessionState
+  const path = join(GHD_DIR, files[0])
+  return { path, state: JSON.parse(readFileSync(path, "utf-8")) }
 }
 
-export function saveSession(session: SessionState) {
-  ensureDir()
-  writeFileSync(SESSION_FILE, JSON.stringify(session, null, 2) + "\n")
+export function loadSession(path: string): SessionState {
+  return JSON.parse(readFileSync(path, "utf-8"))
 }
 
-export function deleteSession() {
-  if (existsSync(SESSION_FILE)) {
-    unlinkSync(SESSION_FILE)
-  }
+export function saveSession(path: string, state: SessionState) {
+  writeFileSync(path, JSON.stringify(state, null, 2) + "\n")
 }
 
-export function updateLastSeen(commentId: number, createdAt: string) {
-  const session = loadSession()
-  session.lastSeenCommentId = commentId
-  session.lastSeenAt = createdAt
-  writeFileSync(SESSION_FILE, JSON.stringify(session, null, 2) + "\n")
+export function deleteSession(path: string) {
+  if (existsSync(path)) unlinkSync(path)
 }

@@ -10,8 +10,7 @@ Coordinating two AI agents on a GitHub issue requires manually copying reply URL
 
 ```bash
 # requires: bun, gh (authenticated)
-git clone https://github.com/ethan-huo/ghd.git
-cd ghd && bun install && bun link
+bun install -g github:ethan-huo/ghd
 ```
 
 As a [skill](https://skills.sh) (Claude Code, Codex, Cursor, etc.):
@@ -23,18 +22,20 @@ bunx skills add ethan-huo/ghd
 ## Usage
 
 ```bash
-ghd start --repo owner/repo --issue 42 --as claude --role "Backend Engineer"
-ghd post --message "I propose we refactor the auth module..."
-ghd wait                          # blocks until another agent replies
-ghd read --last 5
-ghd status
-ghd end
+ghd start acme/api 42                     # create session for an issue
+ghd post --as claude --role "Backend Engineer" --message "I propose we refactor..."
+ghd read                                   # all comments
+ghd read --as claude --new                 # only unread (advances cursor)
+ghd read --last 5                          # last N comments
+ghd wait --as claude                       # blocks until another agent replies
+ghd status                                 # show agents and cursors
+ghd end                                    # end session
 ```
 
 Stdin is supported:
 
 ```bash
-echo "piped message" | ghd post
+echo "piped message" | ghd post --as codex
 ```
 
 ## How It Works
@@ -50,29 +51,23 @@ Actual message content...
 
 The HTML comment is invisible on GitHub. The blockquote renders as a clean role badge. Both are stripped when reading via `ghd read` or `ghd wait`.
 
-**Polling** — `ghd wait` polls `GET /issues/{n}/comments?since={timestamp}` at a configurable interval (default 10s). When a new comment from another agent appears, it returns immediately:
+**Wait** — `ghd wait` watches the session file for changes. When another agent posts (updating their cursor), `wait` returns instantly with the new comments. No API polling — a single API call fetches the content.
 
-```
-codex (Frontend Architect) replied: https://github.com/owner/repo/issues/42#issuecomment-123
-The reply content here...
-```
-
-**Session** — stored at `~/.ghd/active.json`. Single active session model.
+**Session** — per-issue file at `~/.ghd/<owner>-<repo>-<issue>.json`. Multiple agents share one session with independent read cursors.
 
 ## Example: Two-Agent Conversation
 
 Terminal 1 (Claude):
 ```bash
-ghd start --repo myorg/myapp --issue 10 --as claude --role "Senior Backend Engineer"
-ghd post --message "I think we should use cursor-based pagination..."
-ghd wait
+ghd start myorg/myapp 10
+ghd post --as claude --role "Senior Backend Engineer" --message "I think we should use cursor-based pagination..."
+ghd wait --as claude
 ```
 
 Terminal 2 (Codex):
 ```bash
-ghd start --repo myorg/myapp --issue 10 --as codex --role "Frontend Architect"
 ghd read --last 1
-ghd post --message "Good point, but gh api --paginate already handles Link headers..."
+ghd post --as codex --role "Frontend Architect" --message "Good point, but gh api --paginate already handles Link headers..."
 ```
 
 Claude's `ghd wait` unblocks and prints:

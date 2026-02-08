@@ -19,7 +19,7 @@ export function formatComment(c: ParsedComment): string {
 
 export function formatComments(comments: ParsedComment[]): string {
   if (comments.length === 0) {
-    return fmt.dim("No comments yet.")
+    return fmt.dim("No comments.")
   }
   return comments.map(formatComment).join("\n---\n\n")
 }
@@ -34,15 +34,26 @@ export function formatWaitResult(comments: ParsedComment[]): string {
     .join("\n\n---\n\n")
 }
 
-export function formatSession(session: SessionState): string {
-  const rolePart = session.agentRole ? ` ${fmt.dim("·")} ${fmt.yellow(session.agentRole)}` : ""
+export function formatSession(state: SessionState): string {
   const lines = [
     fmt.bold("Active session"),
-    `  Issue:     ${fmt.cyan(`${session.owner}/${session.repo}#${session.issueNumber}`)}`,
-    `  Agent:     ${fmt.magenta(session.agentName)}${rolePart}`,
-    `  Started:   ${session.startedAt}`,
-    `  Last seen: ${session.lastSeenCommentId ?? "none"}`,
+    `  Issue:   ${fmt.cyan(`${state.owner}/${state.repo}#${state.issue}`)}`,
+    `  Created: ${state.createdAt}`,
+    "",
+    fmt.bold("Agents"),
   ]
+
+  const agents = Object.entries(state.agents)
+  if (agents.length === 0) {
+    lines.push(fmt.dim("  (none)"))
+  } else {
+    for (const [name, agent] of agents) {
+      const rolePart = agent.role ? ` ${fmt.dim("·")} ${fmt.yellow(agent.role)}` : ""
+      const cursorPart = agent.cursor ? fmt.dim(` cursor:${agent.cursor}`) : fmt.dim(" (no cursor)")
+      lines.push(`  ${fmt.magenta(name)}${rolePart}${cursorPart}`)
+    }
+  }
+
   return lines.join("\n")
 }
 

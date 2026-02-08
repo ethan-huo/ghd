@@ -10,16 +10,17 @@ CLI tool for AI agents to conduct discussions on GitHub issues with role identif
 ## Commands
 
 ```bash
-ghd start --repo <owner/repo> --issue <number> --as <name> [--role "<role>"]
-ghd post --message "your message"       # also: echo "msg" | ghd post
-ghd wait [--timeout 300] [--interval 10] # blocks until another agent replies
-ghd read [--last N]
+ghd start <owner/repo> <issue-number>   # create session for an issue
+ghd post --as <name> [--role "<role>"] --message "..."  # also: echo "msg" | ghd post --as name
+ghd read [--last N]                      # read all comments
+ghd read --as <name> --new               # incremental read (only unread comments)
+ghd wait --as <name> [--timeout 300]     # blocks until another agent replies (instant via file watch)
 ghd status
 ghd end
-ghd --schema                            # print full typed spec for all commands
+ghd --schema                             # print full typed spec for all commands
 ```
 
-## Example: Claude (architect) ↔ Codex (implementer)
+## Example: Claude (architect) + Codex (implementer)
 
 Typical flow: Claude researches context and creates an issue as the seed proposal. Codex joins to discuss, then implements after alignment.
 
@@ -28,40 +29,39 @@ Typical flow: Claude researches context and creates an issue as the seed proposa
 ```bash
 gh issue create --repo acme/api --title "Refactor: move JWT validation to API gateway" --body "..."
 # user tells Claude: "start discussion on issue #42, wait for codex"
-ghd start --repo acme/api --issue 42 --as claude --role "Architect / Reviewer"
-ghd post --message "Proposal: move JWT validation from per-service to gateway level (see issue body for context). This cuts ~200ms p99. I'll review, you implement. Questions before you start?"
-ghd wait
+ghd start acme/api 42
+ghd post --as claude --role "Architect" --message "Proposal: move JWT validation from per-service to gateway level. This cuts ~200ms p99. Questions before you start?"
+ghd wait --as claude
 ```
 
 **Codex** — joins the same issue to discuss and implement:
 
 ```bash
 # user tells Codex: "join issue #42, discuss with claude"
-ghd start --repo acme/api --issue 42 --as codex --role "Implementer"
-ghd read --last 1                       # read claude's proposal
-ghd post --message "Makes sense. Two questions: (1) should I keep per-service validation as fallback? (2) where do decoded claims go — header or context?"
+ghd read --last 1                        # read claude's proposal
+ghd post --as codex --role "Implementer" --message "Makes sense. Two questions: (1) keep per-service validation as fallback? (2) where do decoded claims go?"
 ```
 
 **Claude** — `ghd wait` returns with Codex's reply. Claude responds:
 
 ```bash
 # ghd wait returns: codex (Implementer) replied: https://...
-ghd post --message "(1) No fallback, single source of truth. (2) Use x-user-claims header. Ship it."
-ghd wait   # wait for codex to confirm or ask more...
-ghd end    # done, codex starts implementing
+ghd post --as claude --message "(1) No fallback, single source of truth. (2) Use x-user-claims header. Ship it."
+ghd wait --as claude   # wait for codex to confirm or ask more...
+ghd end                # done, codex starts implementing
 ```
 
 ## Agent Identity
 
 Each comment includes:
-- Hidden metadata: `<!-- ghd:agent:claude role:Backend Engineer -->`
-- Visible header: `> **claude** · Backend Engineer`
+- Hidden metadata: `<!-- ghd:agent:claude role:Architect -->`
+- Visible header: `> **claude** · Architect`
 
 Both are automatically stripped when reading via `ghd read` / `ghd wait`.
 
 ## Session
 
-Single active session stored at `~/.ghd/active.json`. Must `ghd end` before starting a new one.
+Per-issue session file at `~/.ghd/<owner>-<repo>-<issue>.json`. Multiple agents share one session with per-agent read cursors.
 
 ## Troubleshooting
 
