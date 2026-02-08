@@ -28,13 +28,15 @@ const schema = {
 
   post: c
     .meta({
-      description: "Post a comment (supports stdin: echo 'msg' | ghd post --as name)",
+      description: "Post a comment (supports stdin: echo 'msg' | ghd post 42 --as name)",
       examples: [
-        'ghd post --as claude --role "Architect" --message "Proposal: ..."',
-        'echo "msg" | ghd post --as codex',
+        'ghd post 42 --as claude --role "Architect" --message "Proposal: ..."',
+        'echo "msg" | ghd post 42 --as codex',
       ],
     })
+    .args("issue")
     .input(s(v.object({
+      issue: v.pipe(v.string(), v.transform(Number), v.number(), v.minValue(1)),
       as: v.pipe(v.string(), v.minLength(1), v.description("Agent name")),
       role: v.optional(v.pipe(v.string(), v.minLength(1), v.description("Agent role, visible in comment header"))),
       message: v.optional(v.string()),
@@ -43,9 +45,11 @@ const schema = {
   read: c
     .meta({
       description: "Read comments from the discussion",
-      examples: ["ghd read", "ghd read --last 5", 'ghd read --as claude --new'],
+      examples: ["ghd read 42", "ghd read 42 --last 5", 'ghd read 42 --as claude --new'],
     })
+    .args("issue")
     .input(s(v.object({
+      issue: v.pipe(v.string(), v.transform(Number), v.number(), v.minValue(1)),
       as: v.optional(v.string()),
       new: v.optional(v.boolean(), false),
       last: v.optional(v.pipe(v.number(), v.minValue(1))),
@@ -54,16 +58,21 @@ const schema = {
   wait: c
     .meta({
       description: "Block until another agent replies (instant via file watch)",
-      examples: ["ghd wait --as claude", "ghd wait --as claude --timeout 60"],
+      examples: ["ghd wait 42 --as claude", "ghd wait 42 --as claude --timeout 60"],
     })
+    .args("issue")
     .input(s(v.object({
+      issue: v.pipe(v.string(), v.transform(Number), v.number(), v.minValue(1)),
       as: v.pipe(v.string(), v.minLength(1), v.description("Your agent name")),
       timeout: v.optional(v.pipe(v.number(), v.minValue(1)), 300),
     }))),
 
   status: c
     .meta({ description: "Show session status and agent cursors" })
-    .input(s(v.object({}))),
+    .args("issue")
+    .input(s(v.object({
+      issue: v.pipe(v.string(), v.transform(Number), v.number(), v.minValue(1)),
+    }))),
 
 }
 
@@ -109,7 +118,7 @@ app.run({
     },
 
     post: async ({ input }) => {
-      const { path, state } = findSession()
+      const { path, state } = findSession(input.issue)
 
       // Register or update agent
       if (!state.agents[input.as]) {
@@ -138,7 +147,7 @@ app.run({
     },
 
     read: async ({ input }) => {
-      const { path, state } = findSession()
+      const { path, state } = findSession(input.issue)
 
       if (input["new"] && !input.as) {
         throw new GhdError("INVALID_ARGS", "--new requires --as <agent-name>")
@@ -173,7 +182,7 @@ app.run({
     },
 
     wait: async ({ input }) => {
-      const { path: sessionPath, state } = findSession()
+      const { path: sessionPath, state } = findSession(input.issue)
       const agentName = input.as
 
       // Auto-register agent
@@ -250,8 +259,8 @@ app.run({
       }
     },
 
-    status: () => {
-      const { state } = findSession()
+    status: ({ input }) => {
+      const { state } = findSession(input.issue)
       console.log(formatSession(state))
     },
 

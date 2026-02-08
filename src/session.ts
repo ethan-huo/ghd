@@ -33,13 +33,14 @@ export function startSession(owner: string, repo: string, issue: number): { path
   return { path, state, created: true }
 }
 
-export function findSession(): { path: string; state: SessionState } {
+export function findSession(issue: number): { path: string; state: SessionState } {
   ensureDir()
   const files = readdirSync(GHD_DIR).filter((f) => f.endsWith(".json"))
-  if (files.length === 0) {
-    throw new GhdError("NO_SESSION", "No active session. Run `ghd start` first.")
+  const match = files.find((f) => f.endsWith(`-${issue}.json`))
+  if (!match) {
+    throw new GhdError("NO_SESSION", `No session for issue #${issue}. Run \`ghd start\` first.`)
   }
-  const path = join(GHD_DIR, files[0])
+  const path = join(GHD_DIR, match)
   return { path, state: JSON.parse(readFileSync(path, "utf-8")) }
 }
 
