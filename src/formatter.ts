@@ -1,5 +1,5 @@
 import { fmt } from "argc/terminal"
-import type { ParsedComment, SessionState } from "./types.ts"
+import type { GitHubIssue, ParsedComment, SessionState } from "./types.ts"
 import { GhdError } from "./types.ts"
 
 function label(agentName: string | null, agentRole: string | null, author: string): string {
@@ -8,6 +8,14 @@ function label(agentName: string | null, agentRole: string | null, author: strin
     return `${fmt.magenta(fmt.bold(`@${agentName}`))}${rolePart} ${fmt.dim(`(${author})`)}`
   }
   return fmt.cyan(fmt.bold(`@${author}`))
+}
+
+export function formatIssueBody(issue: GitHubIssue): string {
+  const header = `${fmt.cyan(fmt.bold(`@${issue.user.login}`))} ${fmt.blue("[issue]")} ${fmt.dim(issue.created_at)}`
+  const url = fmt.dim(issue.html_url)
+  const title = issue.title ? `${fmt.bold(issue.title)}\n` : ""
+  const body = (issue.body || "").trim()
+  return `${header}\n${url}\n${title}${body}\n`
 }
 
 export function formatComment(c: ParsedComment): string {

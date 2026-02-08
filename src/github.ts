@@ -1,4 +1,4 @@
-import type { GitHubComment, ParsedComment } from "./types.ts"
+import type { GitHubComment, GitHubIssue, ParsedComment } from "./types.ts"
 import { GhdError } from "./types.ts"
 
 // <!-- ghd:agent:claude --> or <!-- ghd:agent:claude role:Architect -->
@@ -57,9 +57,10 @@ async function execGh(args: string[]): Promise<string> {
   return stdout
 }
 
-export async function validateIssue(owner: string, repo: string, issue: number) {
+export async function fetchIssue(owner: string, repo: string, issue: number): Promise<GitHubIssue> {
   try {
-    await execGh(["api", `repos/${owner}/${repo}/issues/${issue}`, "--jq", ".number"])
+    const raw = await execGh(["api", `repos/${owner}/${repo}/issues/${issue}`])
+    return JSON.parse(raw)
   } catch (e) {
     if (e instanceof GhdError && e.code === "GH_CLI_ERROR") {
       throw new GhdError("ISSUE_NOT_FOUND", `Issue ${owner}/${repo}#${issue} not found or not accessible.`)

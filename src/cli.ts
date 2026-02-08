@@ -5,9 +5,9 @@ import { toStandardJsonSchema } from "@valibot/to-json-schema"
 import * as v from "valibot"
 import { c, cli } from "argc"
 
-import { createSession, deleteSession, findSession, loadSession, saveSession } from "./session.ts"
-import { fetchComments, parseAgentMeta, postComment, toParsedComment, validateIssue } from "./github.ts"
-import { formatComments, formatSession, formatWaitResult } from "./formatter.ts"
+import { deleteSession, findSession, loadSession, saveSession, startSession } from "./session.ts"
+import { fetchComments, fetchIssue, parseAgentMeta, postComment, toParsedComment } from "./github.ts"
+import { formatComments, formatIssueBody, formatSession, formatWaitResult } from "./formatter.ts"
 import { GhdError } from "./types.ts"
 
 const s = toStandardJsonSchema
@@ -22,6 +22,8 @@ const schema = {
     .input(s(v.object({
       repo: v.pipe(v.string(), v.regex(/^[^/]+\/[^/]+$/, "Must be owner/repo format")),
       issue: v.pipe(v.string(), v.transform(Number), v.number(), v.minValue(1)),
+      as: v.optional(v.pipe(v.string(), v.minLength(1), v.description("Agent name to register"))),
+      role: v.optional(v.pipe(v.string(), v.minLength(1), v.description("Agent role"))),
     }))),
 
   post: c
@@ -78,9 +80,35 @@ app.run({
   handlers: {
     start: async ({ input }) => {
       const [owner, repo] = input.repo.split("/")
-      await validateIssue(owner, repo, input.issue)
-      createSession(owner, repo, input.issue)
-      console.log(`Session created: ${owner}/${repo}#${input.issue}`)
+      const issue = await fetchIssue(owner, repo, input.issue)
+      const { path, state, created } = startSession(owner, repo, input.issue)
+
+      // Register agent if --as provided
+      if (input.as) {
+        if (!state.agents[input.as]) {
+          state.agents[input.as] = { role: input.role ?? null, cursor: null }
+        } else if (input.role) {
+          state.agents[input.as].role = input.role
+        }
+      }
+
+      // Fetch all comments and set cursor
+      const comments = await fetchComments(owner, repo, input.issue)
+      const parsed = comments.map((c) => toParsedComment(c, false))
+
+      if (input.as && parsed.length > 0) {
+        state.agents[input.as].cursor = parsed[parsed.length - 1].id
+      }
+      saveSession(path, state)
+
+      console.error(created ? `Session created: ${owner}/${repo}#${input.issue}` : `Session joined: ${owner}/${repo}#${input.issue}`)
+
+      // Output issue body + all comments
+      const parts = [formatIssueBody(issue)]
+      if (parsed.length > 0) {
+        parts.push(formatComments(parsed))
+      }
+      console.log(parts.join("\n---\n\n"))
     },
 
     post: async ({ input }) => {

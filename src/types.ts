@@ -30,9 +30,17 @@ export type ParsedComment = {
   isNew: boolean
 }
 
+export type GitHubIssue = {
+  number: number
+  user: { login: string }
+  title: string
+  body: string | null
+  created_at: string
+  html_url: string
+}
+
 export type GhdErrorCode =
   | "NO_SESSION"
-  | "SESSION_EXISTS"
   | "GH_CLI_ERROR"
   | "TIMEOUT"
   | "INVALID_ARGS"

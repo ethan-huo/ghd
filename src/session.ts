@@ -16,11 +16,11 @@ function sessionFileName(owner: string, repo: string, issue: number): string {
   return `${owner}-${repo}-${issue}.json`
 }
 
-export function createSession(owner: string, repo: string, issue: number): string {
+export function startSession(owner: string, repo: string, issue: number): { path: string; state: SessionState; created: boolean } {
   ensureDir()
   const path = join(GHD_DIR, sessionFileName(owner, repo, issue))
   if (existsSync(path)) {
-    throw new GhdError("SESSION_EXISTS", `Session already exists for ${owner}/${repo}#${issue}. Run \`ghd end\` first.`)
+    return { path, state: JSON.parse(readFileSync(path, "utf-8")), created: false }
   }
   const state: SessionState = {
     owner,
@@ -30,7 +30,7 @@ export function createSession(owner: string, repo: string, issue: number): strin
     createdAt: new Date().toISOString(),
   }
   writeFileSync(path, JSON.stringify(state, null, 2) + "\n")
-  return path
+  return { path, state, created: true }
 }
 
 export function findSession(): { path: string; state: SessionState } {
