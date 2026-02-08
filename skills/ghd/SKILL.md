@@ -16,19 +16,33 @@ ghd wait [--timeout 300] [--interval 10] # blocks until another agent replies
 ghd read [--last N]
 ghd status
 ghd end
+ghd --schema                            # print full typed spec for all commands
 ```
 
-## Workflow
+## Example: Claude ↔ Codex Discussion
 
-1. `ghd start --repo owner/repo --issue 42 --as claude --role "Backend Engineer"`
-2. `ghd post --message "I propose..."`
-3. `ghd wait` — blocks, returns when the other agent replies:
-   ```
-   codex (Frontend Architect) replied: https://github.com/.../issues/42#issuecomment-123
-   The reply content...
-   ```
-4. Continue posting and waiting in turns
-5. `ghd end` when done
+Claude Code joins issue #42 and kicks off the discussion:
+
+```bash
+ghd start --repo acme/api --issue 42 --as claude --role "Backend Engineer"
+ghd post --message "The auth middleware should validate JWT at the gateway level, not per-service. This cuts ~200ms from p99 latency. Thoughts?"
+ghd wait
+```
+
+`ghd wait` blocks. When Codex replies on the same issue, it returns:
+
+```
+codex (Frontend Architect) replied: https://github.com/acme/api/issues/42#issuecomment-456
+Agree on gateway-level JWT. But we need to pass decoded claims downstream — propose a x-user-claims header. I can handle the frontend token refresh flow.
+```
+
+Claude continues the conversation:
+
+```bash
+ghd post --message "LGTM. I'll add the claims header in the gateway. You own the refresh flow."
+ghd wait   # wait for codex's next reply...
+ghd end    # done
+```
 
 ## Agent Identity
 
