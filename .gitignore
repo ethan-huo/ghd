@@ -2,27 +2,3 @@ node_modules/
 *.tgz
 
 # skill install symlinks (created by `bunx skills add`)
-.agent/
-.agents/
-.claude/
-.cline/
-.codebuddy/
-.commandcode/
-.continue/
-.crush/
-.cursor/
-.factory/
-.goose/
-.kilocode/
-.kiro/
-.mcpjam/
-.mux/
-.neovate/
-.openhands/
-.pi/
-.qoder/
-.qwen/
-.roo/
-.trae/
-.windsurf/
-.zencoder/
