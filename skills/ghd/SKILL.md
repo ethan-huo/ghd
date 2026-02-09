@@ -5,68 +5,99 @@ description: GitHub Discussion CLI for AI agents. Turn-based conversations on Gi
 
 # ghd
 
-CLI tool for AI agents to conduct discussions on GitHub issues with role identification.
+CLI tool for AI agents to conduct turn-based discussions on GitHub issues.
+
+## How It Works
+
+Each agent has a **cursor** — a bookmark tracking the last comment you've seen. The cursor advances automatically when you `start`, `post`, `read --as <you> --new`, or `wait`. This means you never need to re-read content you've already seen.
+
+## Your Turn Loop
+
+Every agent follows this loop. No exceptions:
+
+```
+start → post → wait → (wait returns) → read --as <you> --new → post → wait → ...
+         ↑                                                        │
+         └────────────────────────────────────────────────────────┘
+```
+
+### Step by step:
+
+1. **`ghd start <owner/repo> <issue> --as <you> --role "..."`**
+   Entry point. Always use this to enter a conversation — whether it's your first time or you're resuming.
+   Returns the full issue body + all existing comments. Sets your cursor to the latest comment.
+
+2. **`ghd post <issue> --as <you> --message "..."`**
+   Post your reply. Advances your cursor past your own comment.
+
+3. **`ghd wait <issue> --as <you>`**
+   Block until another agent replies. Returns the new comment(s) and advances your cursor.
+
+4. **After `wait` returns, if you need to re-read the new content:**
+   **`ghd read <issue> --as <you> --new`**
+   Returns ONLY comments after your cursor (i.e., things you haven't read). Advances cursor.
+
+Then go back to step 2.
+
+### Key rules:
+
+- **Always use `start` to enter/re-enter a conversation.** It's idempotent — safe to call repeatedly. It gives you full context and resets your cursor to current.
+- **Use `read --as <you> --new` for incremental reads.** This is cursor-aware. You only get what's new.
+- **Do NOT use `read --last N` for checking new replies.** That ignores your cursor and will return content you've already seen. It exists only for debugging or human review.
 
 ## Commands
 
 ```bash
-ghd start <owner/repo> <issue-number> [--as <name> --role "<role>"]  # create/join session, returns issue body + comments
+ghd start <owner/repo> <issue> [--as <name> --role "<role>"]  # enter/re-enter conversation
 ghd post <issue> --as <name> [--role "<role>"] --message "..."  # also: echo "msg" | ghd post <issue> --as name
-ghd read <issue> [--last N]              # read all comments
-ghd read <issue> --as <name> --new       # incremental read (only unread comments)
-ghd wait <issue> --as <name> [--timeout 300]  # blocks until another agent replies (instant via file watch)
+ghd read <issue> --as <name> --new       # incremental read: only unread comments (standard)
+ghd read <issue> [--last N]              # read all or last N comments (debug only)
+ghd wait <issue> --as <name> [--timeout 300]  # block until another agent replies
 ghd status <issue>
-ghd --schema                             # print full typed spec for all commands
 ```
 
-## Example: Claude (architect) + Codex (implementer)
+## Example: Claude + Codex
 
-Typical flow: Claude researches context and creates an issue as the seed proposal. Codex joins to discuss, then implements after alignment.
-
-**Claude** — creates the issue, starts session (returns issue body), posts analysis:
+**Claude** starts the discussion:
 
 ```bash
-gh issue create --repo acme/api --title "Refactor: move JWT validation to API gateway" --body "..."
-# user tells Claude: "start discussion on issue #42, wait for codex"
-ghd start acme/api 42 --as claude --role "Architect"   # → returns issue body
-ghd post 42 --as claude --message "Proposal: move JWT validation from per-service to gateway level. This cuts ~200ms p99. Questions before you start?"
+ghd start acme/api 42 --as claude --role "Architect"
+# → full issue body + any existing comments. Cursor set to latest.
+ghd post 42 --as claude --message "Proposal: move JWT validation to gateway. Cuts ~200ms p99."
 ghd wait 42 --as claude
+# → blocks until codex replies...
 ```
 
-**Codex** — joins the same issue (returns issue body + claude's comment):
+**Codex** joins (in another terminal):
 
 ```bash
-# user tells Codex: "join issue #42, discuss with claude"
-ghd start acme/api 42 --as codex --role "Implementer"  # → returns issue body + claude's comment
-ghd post 42 --as codex --message "Makes sense. Two questions: (1) keep per-service validation as fallback? (2) where do decoded claims go?"
+ghd start acme/api 42 --as codex --role "Implementer"
+# → full issue body + claude's comment. Cursor set to latest.
+ghd post 42 --as codex --message "Makes sense. Keep per-service fallback?"
 ```
 
-**Claude** — `ghd wait` returns with Codex's reply. Claude responds:
+**Claude** — `wait` returns with codex's reply. Claude continues:
 
 ```bash
-# ghd wait returns: codex (Implementer) replied: https://...
-ghd post 42 --as claude --message "(1) No fallback, single source of truth. (2) Use x-user-claims header. Ship it."
-ghd wait 42 --as claude   # wait for codex to confirm or ask more...
+# wait returned codex's comment. Cursor already advanced.
+ghd post 42 --as claude --message "No fallback. Single source of truth. Ship it."
+ghd wait 42 --as claude
 ```
 
 ## Agent Identity
 
-Each comment includes:
-- Hidden metadata: `<!-- ghd:agent:claude role:Architect -->`
-- Visible header: `> **claude** · Architect`
+Each comment includes auto-managed metadata:
+- Hidden: `<!-- ghd:agent:claude role:Architect -->`
+- Visible: `> **claude** · Architect`
 
-Both are automatically stripped when reading via `ghd read` / `ghd wait`.
+Both are stripped when reading via `ghd read` / `ghd wait`.
 
 ## Session
 
-Per-issue session file at `~/.ghd/<owner>-<repo>-<issue>.json`. Multiple agents share one session with per-agent read cursors.
+Per-issue file at `~/.ghd/<owner>-<repo>-<issue>.json`. Multiple agents share one session, each with an independent cursor.
 
 ## Troubleshooting
 
-If `ghd` is not found, install globally:
-
-```bash
-bun install -g github:ethan-huo/ghd
-```
+If `ghd` is not found: `bun install -g github:ethan-huo/ghd`
 
 Requires `gh` CLI authenticated (`gh auth status`).
