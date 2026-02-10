@@ -5,9 +5,10 @@ import { toStandardJsonSchema } from "@valibot/to-json-schema"
 import * as v from "valibot"
 import { c, cli } from "argc"
 
-import { findSession, loadSession, saveSession, startSession } from "./session.ts"
-import { fetchComments, fetchIssue, parseAgentMeta, postComment, toParsedComment } from "./github.ts"
-import { formatComments, formatIssueBody, formatSession, formatWaitResult } from "./formatter.ts"
+import { findSession, loadMeta, messagesDir, saveMeta, startSession } from "./session.ts"
+import { createIssue, fetchComments, fetchIssue, postComment, toParsedComment } from "./github.ts"
+import { formatIssueBody, formatMessages, formatSession } from "./formatter.ts"
+import { importFromGitHub, patchGhCommentId, readAllMessages, readMessagesAfter, writeMessage } from "./message.ts"
 import { GhdError } from "./types.ts"
 
 const s = toStandardJsonSchema
@@ -15,49 +16,53 @@ const s = toStandardJsonSchema
 const schema = {
   start: c
     .meta({
-      description: "Create a discussion session for a GitHub issue",
-      examples: ["ghd start acme/api 42"],
+      description: "Start or join a discussion session",
+      examples: [
+        "ghd start acme/api --issue 42 --as claude --role Architect",
+        'ghd start acme/api --as claude --title "Bug report" --body "Details..."',
+      ],
     })
-    .args("repo", "issue")
+    .args("repo")
     .input(s(v.object({
       repo: v.pipe(v.string(), v.regex(/^[^/]+\/[^/]+$/, "Must be owner/repo format")),
-      issue: v.pipe(v.string(), v.transform(Number), v.number(), v.minValue(1)),
-      as: v.optional(v.pipe(v.string(), v.minLength(1), v.description("Agent name to register"))),
+      issue: v.optional(v.pipe(v.number(), v.minValue(1), v.description("Issue number (join mode)"))),
+      as: v.pipe(v.string(), v.minLength(1), v.description("Agent name")),
       role: v.optional(v.pipe(v.string(), v.minLength(1), v.description("Agent role"))),
+      title: v.optional(v.pipe(v.string(), v.minLength(1), v.description("Issue title (create mode)"))),
+      body: v.optional(v.pipe(v.string(), v.description("Issue body (create mode)"))),
     }))),
 
-  post: c
+  send: c
     .meta({
-      description: "Post a comment (supports stdin: echo 'msg' | ghd post 42 --as name)",
+      description: "Send a message (local-first, best-effort GitHub sync)",
       examples: [
-        'ghd post 42 --as claude --role "Architect" --message "Proposal: ..."',
-        'echo "msg" | ghd post 42 --as codex',
+        'ghd send 42 --as claude --message "Proposal: ..."',
+        "ghd send 42 --as claude --message 'Done.' --wait",
       ],
     })
     .args("issue")
     .input(s(v.object({
       issue: v.pipe(v.string(), v.transform(Number), v.number(), v.minValue(1)),
       as: v.pipe(v.string(), v.minLength(1), v.description("Agent name")),
-      role: v.optional(v.pipe(v.string(), v.minLength(1), v.description("Agent role, visible in comment header"))),
       message: v.optional(v.string()),
+      wait: v.optional(v.boolean(), false),
+      timeout: v.optional(v.pipe(v.number(), v.minValue(1)), 300),
     }))),
 
-  read: c
+  recv: c
     .meta({
-      description: "Read comments from the discussion",
-      examples: ["ghd read 42", "ghd read 42 --last 5", 'ghd read 42 --as claude --new'],
+      description: "Receive new messages (cursor-based incremental read)",
+      examples: ["ghd recv 42 --as claude"],
     })
     .args("issue")
     .input(s(v.object({
       issue: v.pipe(v.string(), v.transform(Number), v.number(), v.minValue(1)),
-      as: v.optional(v.string()),
-      new: v.optional(v.boolean(), false),
-      last: v.optional(v.pipe(v.number(), v.minValue(1))),
+      as: v.pipe(v.string(), v.minLength(1), v.description("Agent name")),
     }))),
 
   wait: c
     .meta({
-      description: "Block until another agent replies (instant via file watch)",
+      description: "Block until another agent sends a message",
       examples: ["ghd wait 42 --as claude", "ghd wait 42 --as claude --timeout 60"],
     })
     .args("issue")
@@ -67,64 +72,137 @@ const schema = {
       timeout: v.optional(v.pipe(v.number(), v.minValue(1)), 300),
     }))),
 
+  log: c
+    .meta({
+      description: "View all messages (debug/review, no cursor interaction)",
+      examples: ["ghd log 42", "ghd log 42 --last 5"],
+    })
+    .args("issue")
+    .input(s(v.object({
+      issue: v.pipe(v.string(), v.transform(Number), v.number(), v.minValue(1)),
+      last: v.optional(v.pipe(v.number(), v.minValue(1))),
+    }))),
+
   status: c
-    .meta({ description: "Show session status and agent cursors" })
+    .meta({ description: "Show session info and agent cursors" })
     .args("issue")
     .input(s(v.object({
       issue: v.pipe(v.string(), v.transform(Number), v.number(), v.minValue(1)),
     }))),
-
 }
 
 const app = cli(schema, {
   name: "ghd",
-  version: "0.2.0",
+  version: "0.3.0",
   description: "GitHub Discussion CLI for AI Agents",
 })
+
+function waitForMessage(
+  msgDir: string,
+  agentName: string,
+  cursor: number,
+  timeout: number,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    // Check immediately
+    const immediate = readMessagesAfter(msgDir, cursor)
+    const hasNew = immediate.some((m) => m.agent !== agentName)
+    if (hasNew) {
+      resolve()
+      return
+    }
+
+    console.error(`Waiting for reply (timeout: ${timeout}s)...`)
+
+    const timer = setTimeout(() => {
+      watcher.close()
+      reject(new GhdError("TIMEOUT", `Timed out after ${timeout}s waiting for reply.`))
+    }, timeout * 1000)
+
+    const watcher = watch(msgDir, () => {
+      const msgs = readMessagesAfter(msgDir, cursor)
+      if (msgs.some((m) => m.agent !== agentName)) {
+        watcher.close()
+        clearTimeout(timer)
+        resolve()
+      }
+    })
+  })
+}
 
 app.run({
   handlers: {
     start: async ({ input }) => {
       const [owner, repo] = input.repo.split("/")
-      const issue = await fetchIssue(owner, repo, input.issue)
-      const { path, state, created } = startSession(owner, repo, input.issue)
 
-      // Register agent if --as provided
-      if (input.as) {
-        if (!state.agents[input.as]) {
-          state.agents[input.as] = { role: input.role ?? null, cursor: null }
-        } else if (input.role) {
-          state.agents[input.as].role = input.role
+      if (!input.issue) {
+        // Create mode
+        if (!input.title) {
+          throw new GhdError("INVALID_ARGS", "Create mode requires --title")
         }
+
+        const ghIssue = await createIssue(owner, repo, input.title, input.body ?? "")
+        const { dir, meta } = startSession(owner, repo, ghIssue.number, {
+          issueUrl: ghIssue.html_url,
+          issueTitle: ghIssue.title,
+          issueBody: ghIssue.body ?? "",
+        })
+
+        if (input.as) {
+          meta.agents[input.as] = { role: input.role ?? null, cursor: 0 }
+          saveMeta(dir, meta)
+        }
+
+        console.error(`Created: ${owner}/${repo}#${ghIssue.number}`)
+        console.log(`#${ghIssue.number}`)
+        return
       }
 
-      // Fetch all comments and set cursor
+      // Join mode
+      const ghIssue = await fetchIssue(owner, repo, input.issue)
       const comments = await fetchComments(owner, repo, input.issue)
       const parsed = comments.map((c) => toParsedComment(c, false))
 
-      if (input.as && parsed.length > 0) {
-        state.agents[input.as].cursor = parsed[parsed.length - 1].id
+      const { dir, meta, created } = startSession(owner, repo, input.issue, {
+        issueUrl: ghIssue.html_url,
+        issueTitle: ghIssue.title,
+        issueBody: ghIssue.body ?? "",
+      })
+
+      // Import comments as local message files
+      const msgDir = messagesDir(dir)
+      const existing = readAllMessages(msgDir)
+      const existingGhIds = new Set(existing.map((m) => m.ghCommentId).filter(Boolean))
+      const newComments = parsed.filter((c) => !existingGhIds.has(c.id))
+
+      let lastSeq = existing.length > 0 ? existing[existing.length - 1].seq : 0
+      if (newComments.length > 0) {
+        lastSeq = importFromGitHub(msgDir, newComments)
       }
-      saveSession(path, state)
+
+      // Register agent + set cursor to latest
+      if (input.as) {
+        meta.agents[input.as] = { role: input.role ?? null, cursor: lastSeq }
+        saveMeta(dir, meta)
+      }
 
       console.error(created ? `Session created: ${owner}/${repo}#${input.issue}` : `Session joined: ${owner}/${repo}#${input.issue}`)
 
-      // Output issue body + all comments
-      const parts = [formatIssueBody(issue)]
-      if (parsed.length > 0) {
-        parts.push(formatComments(parsed))
+      // Output issue body + all messages
+      const allMsgs = readAllMessages(msgDir)
+      const parts = [formatIssueBody(ghIssue)]
+      if (allMsgs.length > 0) {
+        parts.push(formatMessages(allMsgs, false))
       }
       console.log(parts.join("\n---\n\n"))
     },
 
-    post: async ({ input }) => {
-      const { path, state } = findSession(input.issue)
+    send: async ({ input }) => {
+      const { dir, meta } = findSession(input.issue)
 
       // Register or update agent
-      if (!state.agents[input.as]) {
-        state.agents[input.as] = { role: input.role ?? null, cursor: null }
-      } else if (input.role) {
-        state.agents[input.as].role = input.role
+      if (!meta.agents[input.as]) {
+        meta.agents[input.as] = { role: null, cursor: 0 }
       }
 
       let message = input.message
@@ -135,134 +213,100 @@ app.run({
         throw new GhdError("INVALID_ARGS", "No message. Pass --message or pipe via stdin.")
       }
 
-      const comment = await postComment(
-        state.owner, state.repo, state.issue,
-        input.as, state.agents[input.as].role, message,
-      )
+      // Write local first
+      const msgDir = messagesDir(dir)
+      const seq = writeMessage(msgDir, {
+        agent: input.as,
+        role: meta.agents[input.as].role,
+        body: message,
+      })
 
-      state.agents[input.as].cursor = comment.id
-      saveSession(path, state)
+      meta.agents[input.as].cursor = seq
+      saveMeta(dir, meta)
 
-      console.log(`Posted: ${comment.html_url}`)
+      console.error(`Message #${seq} written locally.`)
+
+      // Best-effort GitHub sync
+      try {
+        const comment = await postComment(
+          meta.owner, meta.repo, meta.issue,
+          input.as, meta.agents[input.as].role, message,
+        )
+        patchGhCommentId(msgDir, seq, input.as, comment.id)
+        console.error(`Synced to GitHub: ${comment.html_url}`)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        console.error(`Warning: GitHub sync failed — ${msg}`)
+      }
+
+      // Optional wait
+      if (input.wait) {
+        await waitForMessage(msgDir, input.as, seq, input.timeout!)
+        const newMsgs = readMessagesAfter(msgDir, seq).filter((m) => m.agent !== input.as)
+        if (newMsgs.length > 0) {
+          const latest = newMsgs[newMsgs.length - 1]
+          meta.agents[input.as].cursor = latest.seq
+          saveMeta(dir, meta)
+          console.log(formatMessages(newMsgs, true))
+        }
+      }
     },
 
-    read: async ({ input }) => {
-      const { path, state } = findSession(input.issue)
+    recv: ({ input }) => {
+      const { dir, meta } = findSession(input.issue)
 
-      if (input["new"] && !input.as) {
-        throw new GhdError("INVALID_ARGS", "--new requires --as <agent-name>")
+      if (!meta.agents[input.as]) {
+        meta.agents[input.as] = { role: null, cursor: 0 }
       }
 
-      const comments = await fetchComments(state.owner, state.repo, state.issue)
+      const msgDir = messagesDir(dir)
+      const cursor = meta.agents[input.as].cursor
+      const newMsgs = readMessagesAfter(msgDir, cursor)
 
-      if (input["new"] && input.as) {
-        // Auto-register agent
-        if (!state.agents[input.as]) {
-          state.agents[input.as] = { role: null, cursor: null }
-        }
-        const cursor = state.agents[input.as].cursor
-        const parsed = comments
-          .filter((c) => c.id > (cursor ?? 0))
-          .map((c) => toParsedComment(c, true))
-
-        console.log(formatComments(parsed))
-
-        // Advance cursor
-        if (parsed.length > 0) {
-          state.agents[input.as].cursor = parsed[parsed.length - 1].id
-          saveSession(path, state)
-        }
-      } else {
-        let parsed = comments.map((c) => toParsedComment(c, false))
-        if (input.last !== undefined) {
-          parsed = parsed.slice(-input.last)
-        }
-        console.log(formatComments(parsed))
+      if (newMsgs.length > 0) {
+        const latest = newMsgs[newMsgs.length - 1]
+        meta.agents[input.as].cursor = latest.seq
+        saveMeta(dir, meta)
       }
+
+      console.log(formatMessages(newMsgs, true))
     },
 
     wait: async ({ input }) => {
-      const { path: sessionPath, state } = findSession(input.issue)
-      const agentName = input.as
+      const { dir, meta } = findSession(input.issue)
 
-      // Auto-register agent
-      if (!state.agents[agentName]) {
-        state.agents[agentName] = { role: null, cursor: null }
-        saveSession(sessionPath, state)
+      if (!meta.agents[input.as]) {
+        meta.agents[input.as] = { role: null, cursor: 0 }
+        saveMeta(dir, meta)
       }
 
-      const myCursor = state.agents[agentName].cursor
-      // Snapshot other agents' cursors for comparison
-      const snapshot = Object.fromEntries(
-        Object.entries(state.agents).map(([k, v]) => [k, v.cursor]),
-      )
+      const msgDir = messagesDir(dir)
+      const cursor = meta.agents[input.as].cursor
 
-      function hasOtherCursorChanged(current: typeof state): boolean {
-        return Object.entries(current.agents).some(([name, a]) => {
-          if (name === agentName) return false
-          return a.cursor !== (snapshot[name] ?? null)
-        })
+      await waitForMessage(msgDir, input.as, cursor, input.timeout!)
+
+      const newMsgs = readMessagesAfter(msgDir, cursor).filter((m) => m.agent !== input.as)
+      if (newMsgs.length > 0) {
+        const latest = newMsgs[newMsgs.length - 1]
+        meta.agents[input.as].cursor = latest.seq
+        saveMeta(dir, meta)
+        console.log(formatMessages(newMsgs, true))
       }
+    },
 
-      // Start watcher first, then check immediately (no race condition)
-      const fresh = loadSession(sessionPath)
-      if (!hasOtherCursorChanged(fresh)) {
-        console.error(`Waiting for reply (timeout: ${input.timeout}s)...`)
-
-        await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(() => {
-            watcher.close()
-            reject(new GhdError("TIMEOUT", `Timed out after ${input.timeout}s waiting for reply.`))
-          }, input.timeout * 1000)
-
-          let checking = false
-          const watcher = watch(sessionPath, () => {
-            if (checking) return
-            checking = true
-            try {
-              const current = loadSession(sessionPath)
-              if (hasOtherCursorChanged(current)) {
-                watcher.close()
-                clearTimeout(timer)
-                resolve()
-              }
-            } catch { /* file mid-write, ignore */ }
-            finally { checking = false }
-          })
-
-          // Re-check immediately after watcher setup
-          try {
-            const recheck = loadSession(sessionPath)
-            if (hasOtherCursorChanged(recheck)) {
-              watcher.close()
-              clearTimeout(timer)
-              resolve()
-            }
-          } catch { /* ignore */ }
-        })
+    log: ({ input }) => {
+      const { dir } = findSession(input.issue)
+      const msgDir = messagesDir(dir)
+      let msgs = readAllMessages(msgDir)
+      if (input.last !== undefined) {
+        msgs = msgs.slice(-input.last)
       }
-
-      // Fetch new comments from API (one call)
-      const comments = await fetchComments(state.owner, state.repo, state.issue)
-      const newComments = comments
-        .filter((c) => c.id > (myCursor ?? 0))
-        .filter((c) => parseAgentMeta(c.body)?.name !== agentName)
-        .map((c) => toParsedComment(c, true))
-
-      if (newComments.length > 0) {
-        // Update cursor
-        const latest = loadSession(sessionPath)
-        latest.agents[agentName].cursor = newComments[newComments.length - 1].id
-        saveSession(sessionPath, latest)
-
-        console.log(formatWaitResult(newComments))
-      }
+      console.log(formatMessages(msgs, false))
     },
 
     status: ({ input }) => {
-      const { state } = findSession(input.issue)
-      console.log(formatSession(state))
+      const { meta } = findSession(input.issue)
+      console.log(formatSession(meta))
     },
-
   },
 })

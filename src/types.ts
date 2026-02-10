@@ -1,14 +1,26 @@
 export type AgentState = {
   role: string | null
-  cursor: number | null
+  cursor: number
 }
 
 export type SessionState = {
   owner: string
   repo: string
   issue: number
+  issueUrl: string
+  issueTitle: string
+  issueBody: string
   agents: Record<string, AgentState>
   createdAt: string
+}
+
+export type LocalMessage = {
+  seq: number
+  agent: string
+  role: string | null
+  time: string
+  ghCommentId: number | null
+  body: string
 }
 
 export type GitHubComment = {
@@ -45,6 +57,7 @@ export type GhdErrorCode =
   | "TIMEOUT"
   | "INVALID_ARGS"
   | "ISSUE_NOT_FOUND"
+  | "ISSUE_CREATE_FAILED"
 
 export class GhdError extends Error {
   constructor(

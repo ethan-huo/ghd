@@ -57,6 +57,29 @@ async function execGh(args: string[]): Promise<string> {
   return stdout
 }
 
+export async function createIssue(
+  owner: string,
+  repo: string,
+  title: string,
+  body: string,
+): Promise<GitHubIssue> {
+  try {
+    const raw = await execGh([
+      "api",
+      `repos/${owner}/${repo}/issues`,
+      "--method", "POST",
+      "-f", `title=${title}`,
+      "-f", `body=${body}`,
+    ])
+    return JSON.parse(raw)
+  } catch (e) {
+    if (e instanceof GhdError && e.code === "GH_CLI_ERROR") {
+      throw new GhdError("ISSUE_CREATE_FAILED", `Failed to create issue on ${owner}/${repo}: ${e.message}`)
+    }
+    throw e
+  }
+}
+
 export async function fetchIssue(owner: string, repo: string, issue: number): Promise<GitHubIssue> {
   try {
     const raw = await execGh(["api", `repos/${owner}/${repo}/issues/${issue}`])

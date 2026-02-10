@@ -6,49 +6,75 @@ import { GhdError } from "./types.ts"
 
 const GHD_DIR = join(homedir(), ".ghd")
 
-function ensureDir() {
-  if (!existsSync(GHD_DIR)) {
-    mkdirSync(GHD_DIR, { recursive: true })
+function ensureDir(dir: string) {
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
   }
 }
 
-function sessionFileName(owner: string, repo: string, issue: number): string {
-  return `${owner}-${repo}-${issue}.json`
+export function sessionDir(owner: string, repo: string, issue: number): string {
+  return join(GHD_DIR, `${owner}-${repo}-${issue}`)
 }
 
-export function startSession(owner: string, repo: string, issue: number): { path: string; state: SessionState; created: boolean } {
-  ensureDir()
-  const path = join(GHD_DIR, sessionFileName(owner, repo, issue))
-  if (existsSync(path)) {
-    return { path, state: JSON.parse(readFileSync(path, "utf-8")), created: false }
-  }
-  const state: SessionState = {
-    owner,
-    repo,
-    issue,
-    agents: {},
-    createdAt: new Date().toISOString(),
-  }
-  writeFileSync(path, JSON.stringify(state, null, 2) + "\n")
-  return { path, state, created: true }
+export function messagesDir(dir: string): string {
+  return join(dir, "messages")
 }
 
-export function findSession(issue: number): { path: string; state: SessionState } {
-  ensureDir()
-  const files = readdirSync(GHD_DIR).filter((f) => f.endsWith(".json"))
-  const match = files.find((f) => f.endsWith(`-${issue}.json`))
+export function metaPath(dir: string): string {
+  return join(dir, "meta.json")
+}
+
+export function createSession(dir: string, meta: SessionState): void {
+  ensureDir(dir)
+  ensureDir(messagesDir(dir))
+  writeFileSync(metaPath(dir), JSON.stringify(meta, null, 2) + "\n")
+}
+
+export function loadMeta(dir: string): SessionState {
+  return JSON.parse(readFileSync(metaPath(dir), "utf-8"))
+}
+
+export function saveMeta(dir: string, meta: SessionState): void {
+  writeFileSync(metaPath(dir), JSON.stringify(meta, null, 2) + "\n")
+}
+
+export function findSession(issue: number): { dir: string; meta: SessionState } {
+  ensureDir(GHD_DIR)
+  const entries = readdirSync(GHD_DIR, { withFileTypes: true })
+  const match = entries.find((e) => e.isDirectory() && e.name.endsWith(`-${issue}`))
   if (!match) {
     throw new GhdError("NO_SESSION", `No session for issue #${issue}. Run \`ghd start\` first.`)
   }
-  const path = join(GHD_DIR, match)
-  return { path, state: JSON.parse(readFileSync(path, "utf-8")) }
+  const dir = join(GHD_DIR, match.name)
+  return { dir, meta: loadMeta(dir) }
 }
 
-export function loadSession(path: string): SessionState {
-  return JSON.parse(readFileSync(path, "utf-8"))
+export function startSession(
+  owner: string,
+  repo: string,
+  issue: number,
+  issueMeta: { issueUrl: string; issueTitle: string; issueBody: string },
+): { dir: string; meta: SessionState; created: boolean } {
+  const dir = sessionDir(owner, repo, issue)
+  if (existsSync(metaPath(dir))) {
+    const meta = loadMeta(dir)
+    // Update issue metadata in case it changed
+    meta.issueUrl = issueMeta.issueUrl
+    meta.issueTitle = issueMeta.issueTitle
+    meta.issueBody = issueMeta.issueBody
+    saveMeta(dir, meta)
+    return { dir, meta, created: false }
+  }
+  const meta: SessionState = {
+    owner,
+    repo,
+    issue,
+    issueUrl: issueMeta.issueUrl,
+    issueTitle: issueMeta.issueTitle,
+    issueBody: issueMeta.issueBody,
+    agents: {},
+    createdAt: new Date().toISOString(),
+  }
+  createSession(dir, meta)
+  return { dir, meta, created: true }
 }
-
-export function saveSession(path: string, state: SessionState) {
-  writeFileSync(path, JSON.stringify(state, null, 2) + "\n")
-}
-
