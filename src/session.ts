@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import type { SessionState } from "./types.ts"
@@ -38,28 +38,12 @@ export function saveMeta(dir: string, meta: SessionState): void {
   writeFileSync(metaPath(dir), JSON.stringify(meta, null, 2) + "\n")
 }
 
-export function findSession(issue: number): { dir: string; meta: SessionState } {
-  ensureDir(GHD_DIR)
-  const suffix = `#${issue}`
-  const owners = readdirSync(GHD_DIR, { withFileTypes: true }).filter((e) => e.isDirectory())
-  const matches: string[] = []
-  for (const owner of owners) {
-    const ownerDir = join(GHD_DIR, owner.name)
-    const repos = readdirSync(ownerDir, { withFileTypes: true }).filter((e) => e.isDirectory())
-    for (const repo of repos) {
-      if (repo.name.endsWith(suffix)) {
-        matches.push(join(ownerDir, repo.name))
-      }
-    }
+export function findSession(owner: string, repo: string, issue: number): { dir: string; meta: SessionState } {
+  const dir = sessionDir(owner, repo, issue)
+  if (!existsSync(metaPath(dir))) {
+    throw new GhdError("NO_SESSION", `No session for ${owner}/${repo}#${issue}. Run \`ghd start\` first.`)
   }
-  if (matches.length === 0) {
-    throw new GhdError("NO_SESSION", `No session for issue #${issue}. Run \`ghd start\` first.`)
-  }
-  if (matches.length > 1) {
-    const names = matches.map((d) => d.slice(GHD_DIR.length + 1)).join(", ")
-    throw new GhdError("INVALID_ARGS", `Multiple sessions for #${issue}: ${names}. Use --repo to disambiguate.`)
-  }
-  return { dir: matches[0], meta: loadMeta(matches[0]) }
+  return { dir, meta: loadMeta(dir) }
 }
 
 export function startSession(
