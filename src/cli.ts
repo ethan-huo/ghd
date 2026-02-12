@@ -14,36 +14,32 @@ import { GhdError } from "./types.ts"
 const s = toStandardJsonSchema
 
 function parseTarget(target: string): { owner: string; repo: string; issue: number } {
-  const hashIdx = target.indexOf("#")
-  if (hashIdx === -1) {
-    throw new GhdError("INVALID_ARGS", "Target must be owner/repo#issue")
+  const parts = target.split("/")
+  if (parts.length !== 3) {
+    throw new GhdError("INVALID_ARGS", "Target must be owner/repo/issue")
   }
-  const repoStr = target.slice(0, hashIdx)
-  const issue = Number(target.slice(hashIdx + 1))
-  if (!/^[^/]+\/[^/]+$/.test(repoStr)) {
-    throw new GhdError("INVALID_ARGS", "Target must be owner/repo#issue")
+  const [owner, repo, issueStr] = parts
+  const issue = Number(issueStr)
+  if (!owner || !repo || !Number.isFinite(issue) || issue < 1) {
+    throw new GhdError("INVALID_ARGS", "Target must be owner/repo/issue")
   }
-  if (!Number.isFinite(issue) || issue < 1) {
-    throw new GhdError("INVALID_ARGS", "Issue number must be a positive integer")
-  }
-  const [owner, repo] = repoStr.split("/")
   return { owner, repo, issue }
 }
 
-const targetInput = v.pipe(v.string(), v.description("owner/repo#issue"))
+const targetInput = v.pipe(v.string(), v.description("owner/repo/issue"))
 
 const schema = {
   start: c
     .meta({
       description: "Start or join a discussion session",
       examples: [
-        "ghd start acme/api#42 --as claude --role Architect",
+        "ghd start acme/api/42 --as claude --role Architect",
         'ghd start acme/api --as claude --title "Bug report" --body "Details..."',
       ],
     })
     .args("target")
     .input(s(v.object({
-      target: v.pipe(v.string(), v.description("owner/repo#issue (join) or owner/repo (create)")),
+      target: v.pipe(v.string(), v.description("owner/repo/issue (join) or owner/repo (create)")),
       as: v.pipe(v.string(), v.minLength(1), v.description("Agent name")),
       role: v.optional(v.pipe(v.string(), v.minLength(1), v.description("Agent role"))),
       title: v.optional(v.pipe(v.string(), v.minLength(1), v.description("Issue title (create mode)"))),
@@ -54,8 +50,8 @@ const schema = {
     .meta({
       description: "Send a message (local-first, best-effort GitHub sync)",
       examples: [
-        'ghd send acme/api#42 --as claude --message "Proposal: ..."',
-        "ghd send acme/api#42 --as claude --message 'Done.' --wait",
+        'ghd send acme/api/42 --as claude --message "Proposal: ..."',
+        "ghd send acme/api/42 --as claude --message 'Done.' --wait",
       ],
     })
     .args("target")
@@ -70,7 +66,7 @@ const schema = {
   recv: c
     .meta({
       description: "Receive new messages (cursor-based incremental read)",
-      examples: ["ghd recv acme/api#42 --as claude"],
+      examples: ["ghd recv acme/api/42 --as claude"],
     })
     .args("target")
     .input(s(v.object({
@@ -81,7 +77,7 @@ const schema = {
   wait: c
     .meta({
       description: "Block until another agent sends a message",
-      examples: ["ghd wait acme/api#42 --as claude", "ghd wait acme/api#42 --as claude --timeout 60"],
+      examples: ["ghd wait acme/api/42 --as claude", "ghd wait acme/api/42 --as claude --timeout 60"],
     })
     .args("target")
     .input(s(v.object({
@@ -93,7 +89,7 @@ const schema = {
   log: c
     .meta({
       description: "View all messages (debug/review, no cursor interaction)",
-      examples: ["ghd log acme/api#42", "ghd log acme/api#42 --last 5"],
+      examples: ["ghd log acme/api/42", "ghd log acme/api/42 --last 5"],
     })
     .args("target")
     .input(s(v.object({
@@ -156,17 +152,16 @@ function resolveSession(target: string) {
 app.run({
   handlers: {
     start: async ({ input }) => {
-      const hashIdx = input.target.indexOf("#")
-      if (hashIdx === -1) {
+      const parts = input.target.split("/")
+      if (parts.length === 2) {
         // Create mode
-        const repoStr = input.target
-        if (!/^[^/]+\/[^/]+$/.test(repoStr)) {
-          throw new GhdError("INVALID_ARGS", "Target must be owner/repo or owner/repo#issue")
+        const [owner, repo] = parts
+        if (!owner || !repo) {
+          throw new GhdError("INVALID_ARGS", "Target must be owner/repo or owner/repo/issue")
         }
         if (!input.title) {
           throw new GhdError("INVALID_ARGS", "Create mode requires --title")
         }
-        const [owner, repo] = repoStr.split("/")
 
         const ghIssue = await createIssue(owner, repo, input.title, input.body ?? "")
         const { dir, meta } = startSession(owner, repo, ghIssue.number, {
@@ -214,11 +209,11 @@ app.run({
 
       // Output issue body + all messages
       const allMsgs = readAllMessages(msgDir)
-      const parts = [formatIssueBody(ghIssue)]
+      const output = [formatIssueBody(ghIssue)]
       if (allMsgs.length > 0) {
-        parts.push(formatMessages(allMsgs, false))
+        output.push(formatMessages(allMsgs, false))
       }
-      console.log(parts.join("\n---\n\n"))
+      console.log(output.join("\n---\n\n"))
     },
 
     send: async ({ input }) => {

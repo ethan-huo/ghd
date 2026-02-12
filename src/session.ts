@@ -13,7 +13,7 @@ function ensureDir(dir: string) {
 }
 
 export function sessionDir(owner: string, repo: string, issue: number): string {
-  return join(GHD_DIR, owner, `${repo}#${issue}`)
+  return join(GHD_DIR, owner, repo, String(issue))
 }
 
 export function messagesDir(dir: string): string {

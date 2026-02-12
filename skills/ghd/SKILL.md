@@ -21,19 +21,19 @@ start → send → wait → (wait returns) → send → wait → ...
 
 ### Step by step:
 
-1. **`ghd start <owner/repo>#<N> --as <you> --role "..."`**
+1. **`ghd start <owner/repo/<N> --as <you> --role "..."`**
    Entry point. Always use this to enter a conversation — whether it's your first time or you're resuming.
    Fetches issue + comments from GitHub, imports as local messages, sets your cursor to latest.
    Returns the full issue body + all messages.
 
-2. **`ghd send <owner/repo>#<N> --as <you> --message "..."`**
+2. **`ghd send <owner/repo/<N> --as <you> --message "..."`**
    Send your reply. Writes locally first, then syncs to GitHub. Advances your cursor.
 
-3. **`ghd wait <owner/repo>#<N> --as <you>`**
+3. **`ghd wait <owner/repo/<N> --as <you>`**
    Block until another agent sends a message. Returns the new message(s) and advances your cursor.
 
 4. **If you need to check for messages without blocking:**
-   **`ghd recv <owner/repo>#<N> --as <you>`**
+   **`ghd recv <owner/repo/<N> --as <you>`**
    Returns ONLY messages after your cursor. Advances cursor.
 
 Then go back to step 2.
@@ -48,27 +48,27 @@ Then go back to step 2.
 
 ```bash
 # Start or join a conversation
-ghd start <owner/repo>#<N> --as <name> [--role "<role>"]
+ghd start <owner/repo/<N> --as <name> [--role "<role>"]
 
 # Create a new issue and start a conversation
 ghd start <owner/repo> --as <name> --title "..." [--body "..."]
 
 # Send a message (local-first, best-effort GitHub sync)
-ghd send <owner/repo>#<N> --as <name> --message "..."
-ghd send <owner/repo>#<N> --as <name> --message "..." --wait          # send + block for reply
-ghd send <owner/repo>#<N> --as <name> --message "..." --wait --timeout 60
+ghd send <owner/repo/<N> --as <name> --message "..."
+ghd send <owner/repo/<N> --as <name> --message "..." --wait          # send + block for reply
+ghd send <owner/repo/<N> --as <name> --message "..." --wait --timeout 60
 
 # Receive new messages (non-blocking, cursor-based)
-ghd recv <owner/repo>#<N> --as <name>
+ghd recv <owner/repo/<N> --as <name>
 
 # Block until another agent sends a message
-ghd wait <owner/repo>#<N> --as <name> [--timeout 300]
+ghd wait <owner/repo/<N> --as <name> [--timeout 300]
 
 # View all messages (debug only, no cursor interaction)
-ghd log <owner/repo>#<N> [--last N]
+ghd log <owner/repo/<N> [--last N]
 
 # Show session info + agent cursors
-ghd status <owner/repo>#<N>
+ghd status <owner/repo/<N>
 ```
 
 ## Example: Claude + Codex
@@ -76,33 +76,33 @@ ghd status <owner/repo>#<N>
 **Claude** starts the discussion:
 
 ```bash
-ghd start acme/api#42 --as claude --role "Architect"
+ghd start acme/api/42 --as claude --role "Architect"
 # → full issue body + any existing messages. Cursor set to latest.
-ghd send acme/api#42 --as claude --message "Proposal: move JWT validation to gateway. Cuts ~200ms p99."
-ghd wait acme/api#42 --as claude
+ghd send acme/api/42 --as claude --message "Proposal: move JWT validation to gateway. Cuts ~200ms p99."
+ghd wait acme/api/42 --as claude
 # → blocks until codex replies...
 ```
 
 **Codex** joins (in another terminal):
 
 ```bash
-ghd start acme/api#42 --as codex --role "Implementer"
+ghd start acme/api/42 --as codex --role "Implementer"
 # → full issue body + claude's message. Cursor set to latest.
-ghd send acme/api#42 --as codex --message "Makes sense. Keep per-service fallback?"
+ghd send acme/api/42 --as codex --message "Makes sense. Keep per-service fallback?"
 ```
 
 **Claude** — `wait` returns with codex's reply. Claude continues:
 
 ```bash
 # wait returned codex's message. Cursor already advanced.
-ghd send acme/api#42 --as claude --message "No fallback. Single source of truth. Ship it. Implement the gateway middleware first, reply when it's ready for review." --wait
+ghd send acme/api/42 --as claude --message "No fallback. Single source of truth. Ship it. Implement the gateway middleware first, reply when it's ready for review." --wait
 # → sends message and blocks until codex replies
 ```
 
 **Codex** — implements the middleware, then replies:
 
 ```bash
-ghd send acme/api#42 --as codex --message "Gateway middleware done. See commit abc123."
+ghd send acme/api/42 --as codex --message "Gateway middleware done. See commit abc123."
 ```
 
 **Claude** — `--wait` unblocks with codex's reply. Reviews and continues.
@@ -114,7 +114,7 @@ Start a fresh conversation by creating a GitHub issue:
 ```bash
 ghd start acme/api --as claude --title "Refactor JWT validation" --body "Current implementation..."
 # → creates issue, outputs #N
-ghd send acme/api#N --as claude --message "Let's start with the gateway middleware."
+ghd send acme/api/N --as claude --message "Let's start with the gateway middleware."
 ```
 
 ## Troubleshooting
