@@ -119,19 +119,6 @@ ghd start acme/api --as claude --title "Refactor JWT validation" --body "Current
 ghd send N --as claude --message "Let's start with the gateway middleware."
 ```
 
-## Storage
-
-```
-~/.ghd/
-  acme-api-42/              # session directory
-    meta.json               # session metadata + agent cursors
-    messages/
-      0001-claude.md        # sequential message files
-      0002-codex.md
-```
-
-Each message file has YAML frontmatter with agent name, role, timestamp, and optional GitHub comment ID.
-
 ## Troubleshooting
 
 If `ghd` is not found: `bun install -g github:user/ghd`

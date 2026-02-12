@@ -13,7 +13,7 @@ function ensureDir(dir: string) {
 }
 
 export function sessionDir(owner: string, repo: string, issue: number): string {
-  return join(GHD_DIR, `${owner}-${repo}-${issue}`)
+  return join(GHD_DIR, owner, `${repo}#${issue}`)
 }
 
 export function messagesDir(dir: string): string {
@@ -40,13 +40,26 @@ export function saveMeta(dir: string, meta: SessionState): void {
 
 export function findSession(issue: number): { dir: string; meta: SessionState } {
   ensureDir(GHD_DIR)
-  const entries = readdirSync(GHD_DIR, { withFileTypes: true })
-  const match = entries.find((e) => e.isDirectory() && e.name.endsWith(`-${issue}`))
-  if (!match) {
+  const suffix = `#${issue}`
+  const owners = readdirSync(GHD_DIR, { withFileTypes: true }).filter((e) => e.isDirectory())
+  const matches: string[] = []
+  for (const owner of owners) {
+    const ownerDir = join(GHD_DIR, owner.name)
+    const repos = readdirSync(ownerDir, { withFileTypes: true }).filter((e) => e.isDirectory())
+    for (const repo of repos) {
+      if (repo.name.endsWith(suffix)) {
+        matches.push(join(ownerDir, repo.name))
+      }
+    }
+  }
+  if (matches.length === 0) {
     throw new GhdError("NO_SESSION", `No session for issue #${issue}. Run \`ghd start\` first.`)
   }
-  const dir = join(GHD_DIR, match.name)
-  return { dir, meta: loadMeta(dir) }
+  if (matches.length > 1) {
+    const names = matches.map((d) => d.slice(GHD_DIR.length + 1)).join(", ")
+    throw new GhdError("INVALID_ARGS", `Multiple sessions for #${issue}: ${names}. Use --repo to disambiguate.`)
+  }
+  return { dir: matches[0], meta: loadMeta(matches[0]) }
 }
 
 export function startSession(
