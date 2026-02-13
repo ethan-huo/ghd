@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 
-import { watch } from "node:fs"
+import { readFileSync, watch } from "node:fs"
+import { resolve } from "node:path"
+import { homedir } from "node:os"
 import { toStandardJsonSchema } from "@valibot/to-json-schema"
 import * as v from "valibot"
 import { c, cli } from "argc"
@@ -60,7 +62,7 @@ const schema = {
       as: v.pipe(v.string(), v.minLength(1), v.description("Agent name")),
       message: v.optional(v.string()),
       wait: v.optional(v.boolean(), false),
-      timeout: v.optional(v.pipe(v.number(), v.minValue(1)), 300),
+      timeout: v.optional(v.pipe(v.number(), v.minValue(1)), 600),
     }))),
 
   recv: c
@@ -77,13 +79,13 @@ const schema = {
   wait: c
     .meta({
       description: "Block until another agent sends a message",
-      examples: ["ghd wait acme/api/42 --as claude", "ghd wait acme/api/42 --as claude --timeout 60"],
+      examples: ["ghd wait acme/api/42 --as claude", "ghd wait acme/api/42 --as claude --timeout 120"],
     })
     .args("target")
     .input(s(v.object({
       target: targetInput,
       as: v.pipe(v.string(), v.minLength(1), v.description("Your agent name")),
-      timeout: v.optional(v.pipe(v.number(), v.minValue(1)), 300),
+      timeout: v.optional(v.pipe(v.number(), v.minValue(1)), 600),
     }))),
 
   log: c
@@ -229,7 +231,14 @@ app.run({
         message = (await Bun.stdin.text()).trim()
       }
       if (!message) {
-        throw new GhdError("INVALID_ARGS", "No message. Pass --message or pipe via stdin.")
+        throw new GhdError("INVALID_ARGS", "No message. Pass --message, @file, or pipe via stdin.")
+      }
+      if (message.startsWith("@")) {
+        const raw = message.slice(1)
+        const filePath = raw.startsWith("~/")
+          ? resolve(homedir(), raw.slice(2))
+          : resolve(raw)
+        message = readFileSync(filePath, "utf-8").trim()
       }
 
       // Write local first

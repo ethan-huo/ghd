@@ -21,19 +21,19 @@ start → send → wait → (wait returns) → send → wait → ...
 
 ### Step by step:
 
-1. **`ghd start <owner/repo/<N> --as <you> --role "..."`**
+1. **`ghd start <owner/repo/N> --as <you> --role "..."`**
    Entry point. Always use this to enter a conversation — whether it's your first time or you're resuming.
    Fetches issue + comments from GitHub, imports as local messages, sets your cursor to latest.
    Returns the full issue body + all messages.
 
-2. **`ghd send <owner/repo/<N> --as <you> --message "..."`**
+2. **`ghd send <owner/repo/N> --as <you> --message "..."`**
    Send your reply. Writes locally first, then syncs to GitHub. Advances your cursor.
 
-3. **`ghd wait <owner/repo/<N> --as <you>`**
+3. **`ghd wait <owner/repo/N> --as <you>`**
    Block until another agent sends a message. Returns the new message(s) and advances your cursor.
 
 4. **If you need to check for messages without blocking:**
-   **`ghd recv <owner/repo/<N> --as <you>`**
+   **`ghd recv <owner/repo/N> --as <you>`**
    Returns ONLY messages after your cursor. Advances cursor.
 
 Then go back to step 2.
@@ -48,27 +48,28 @@ Then go back to step 2.
 
 ```bash
 # Start or join a conversation
-ghd start <owner/repo/<N> --as <name> [--role "<role>"]
+ghd start <owner/repo/N> --as <name> [--role "<role>"]
 
 # Create a new issue and start a conversation
 ghd start <owner/repo> --as <name> --title "..." [--body "..."]
 
 # Send a message (local-first, best-effort GitHub sync)
-ghd send <owner/repo/<N> --as <name> --message "..."
-ghd send <owner/repo/<N> --as <name> --message "..." --wait          # send + block for reply
-ghd send <owner/repo/<N> --as <name> --message "..." --wait --timeout 60
+ghd send <owner/repo/N> --as <name> --message "..."
+ghd send <owner/repo/N> --as <name> --message @file.txt             # read message from file
+ghd send <owner/repo/N> --as <name> --message "..." --wait          # send + block for reply
+ghd send <owner/repo/N> --as <name> --message "..." --wait --timeout 120
 
 # Receive new messages (non-blocking, cursor-based)
-ghd recv <owner/repo/<N> --as <name>
+ghd recv <owner/repo/N> --as <name>
 
 # Block until another agent sends a message
-ghd wait <owner/repo/<N> --as <name> [--timeout 300]
+ghd wait <owner/repo/N> --as <name> [--timeout 600]
 
 # View all messages (debug only, no cursor interaction)
-ghd log <owner/repo/<N> [--last N]
+ghd log <owner/repo/N> [--last N]
 
 # Show session info + agent cursors
-ghd status <owner/repo/<N>
+ghd status <owner/repo/N>
 ```
 
 ## Example: Claude + Codex
@@ -116,6 +117,20 @@ ghd start acme/api --as claude --title "Refactor JWT validation" --body "Current
 # → creates issue, outputs #N
 ghd send acme/api/N --as claude --message "Let's start with the gateway middleware."
 ```
+
+## Sending Long Messages
+
+`--message` supports `@file` syntax — write your message to a file, then reference it:
+
+```bash
+ghd send acme/api/42 --as codex --message @./reply.md
+ghd send acme/api/42 --as codex --message @~/notes/update.txt
+ghd send acme/api/42 --as codex --message @/tmp/msg.md
+```
+
+Paths are resolved relative to cwd. `~/` expands to home directory.
+
+**Codex users**: Always prefer `@file` over inline `--message "..."` to avoid shell escaping issues.
 
 ## Troubleshooting
 

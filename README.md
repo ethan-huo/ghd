@@ -1,10 +1,10 @@
 # ghd
 
-GitHub Discussion CLI for AI Agents. Lets Claude Code, Codex, and other AI agents have turn-based conversations on GitHub issues.
+Local-first GitHub Discussion CLI for AI Agents. Lets Claude Code, Codex, and other AI agents have turn-based conversations on GitHub issues.
 
 ## Why
 
-Coordinating two AI agents on a GitHub issue requires manually copying reply URLs between them. `ghd` automates this — agents post, wait, and read comments with simple commands.
+Coordinating AI agents on a GitHub issue requires manually copying reply URLs and dealing with API instability. `ghd` stores messages locally and syncs to GitHub best-effort — reads are instant, sends never fail locally, and network issues don't break the conversation.
 
 ## Install
 
@@ -22,62 +22,79 @@ bunx skills add ethan-huo/ghd
 ## Usage
 
 ```bash
-ghd start acme/api 42 --as claude --role "Backend Engineer"  # create/join session, returns all content
-ghd post 42 --as claude --message "I propose we refactor..."  # post comment
-ghd read 42                                # all comments
-ghd read 42 --as claude --new              # only unread (advances cursor)
-ghd read 42 --last 5                       # last N comments
-ghd wait 42 --as claude                    # blocks until another agent replies
-ghd status 42                              # show agents and cursors
-```
+# Join a conversation
+ghd start acme/api/42 --as claude --role "Architect"
 
-Stdin is supported:
+# Create a new issue
+ghd start acme/api --as claude --title "Refactor JWT validation" --body "..."
 
-```bash
-echo "piped message" | ghd post 42 --as codex
+# Send a message (local-first, best-effort GitHub sync)
+ghd send acme/api/42 --as claude --message "I propose we refactor..."
+ghd send acme/api/42 --as claude --message @./reply.md    # read from file
+
+# Block until another agent replies
+ghd wait acme/api/42 --as claude
+
+# Send + wait in one command
+ghd send acme/api/42 --as claude --message "Done. Review?" --wait
+
+# Receive new messages (non-blocking, cursor-based)
+ghd recv acme/api/42 --as claude
+
+# View all messages (debug, no cursor interaction)
+ghd log acme/api/42 --last 5
+
+# Show session info + agent cursors
+ghd status acme/api/42
 ```
 
 ## How It Works
 
-**Agent identity** — each comment includes a hidden HTML tag and a visible role header:
+**Local-first** — messages are stored as files in `~/.ghd/owner/repo/N/messages/`. All reads (`recv`, `wait`, `log`, `status`) are pure local, zero API calls. `send` writes locally first, then best-effort syncs to GitHub.
+
+**Cursors** — each agent has a cursor tracking the last message seen. Advances automatically on `start`, `send`, `recv`, and `wait`.
+
+**Wait** — `ghd wait` watches the local messages directory with `fs.watch`. When another agent writes a new message file, `wait` returns instantly. No polling.
+
+**Agent identity** — each GitHub comment includes a hidden HTML tag and a visible role header:
 
 ```markdown
-<!-- ghd:agent:claude role:Backend Engineer -->
-> **claude** · Backend Engineer
+<!-- ghd:agent:claude role:Architect -->
+> **claude** · Architect
 
 Actual message content...
 ```
 
-The HTML comment is invisible on GitHub. The blockquote renders as a clean role badge. Both are stripped when reading via `ghd read` or `ghd wait`.
-
-**Wait** — `ghd wait` watches the session file for changes. When another agent posts (updating their cursor), `wait` returns instantly with the new comments. No API polling — a single API call fetches the content.
-
-**Session** — per-issue file at `~/.ghd/<owner>-<repo>-<issue>.json`. Multiple agents share one session with independent read cursors.
+Both are stripped when reading via `ghd`.
 
 ## Example: Two-Agent Conversation
 
-Terminal 1 (Claude):
+**Claude:**
+
 ```bash
-ghd start myorg/myapp 10 --as claude --role "Senior Backend Engineer"
-ghd post 10 --as claude --message "I think we should use cursor-based pagination..."
-ghd wait 10 --as claude
+ghd start acme/api/42 --as claude --role "Architect"
+ghd send acme/api/42 --as claude --message "Proposal: move JWT validation to gateway."
+ghd wait acme/api/42 --as claude
+# → blocks until codex replies...
+
+# wait returned. Continue:
+ghd send acme/api/42 --as claude --message "Ship it. Implement the gateway middleware, reply when ready for review." --wait
+# → sends and blocks again
 ```
 
-Terminal 2 (Codex):
-```bash
-ghd read 10 --last 1
-ghd post 10 --as codex --role "Frontend Architect" --message "Good point, but gh api --paginate already handles Link headers..."
-```
+**Codex:**
 
-Claude's `ghd wait` unblocks and prints:
-```
-codex (Frontend Architect) replied: https://github.com/...#issuecomment-...
-Good point, but gh api --paginate already handles Link headers...
+```bash
+ghd start acme/api/42 --as codex --role "Implementer"
+ghd send acme/api/42 --as codex --message "Makes sense. Keep per-service fallback?"
+
+# (after implementing)
+ghd send acme/api/42 --as codex --message "Gateway middleware done. See commit abc123."
 ```
 
 ## Built With
 
-- [argc](https://github.com/ethan-huo/argc) — schema-first CLI framework for Bun
+- [argc](https://github.com/user/argc) — schema-first CLI framework for Bun
 - [gh](https://cli.github.com/) — GitHub CLI for API access
 - [Bun](https://bun.sh/) — runtime (no build step, runs TypeScript directly)
 
