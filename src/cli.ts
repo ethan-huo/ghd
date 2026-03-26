@@ -15,33 +15,72 @@ import { GhdError } from "./types.ts"
 
 const s = toStandardJsonSchema
 
-function parseTarget(target: string): { owner: string; repo: string; issue: number } {
-  const parts = target.split("/")
-  if (parts.length !== 3) {
-    throw new GhdError("INVALID_ARGS", "Target must be owner/repo/issue")
+// Parse GitHub owner/repo from a git remote URL
+function parseGitHubRemote(url: string): { owner: string; repo: string } {
+  const match = url.replace(/\.git$/, "").match(/github\.com[:/]([^/]+)\/([^/]+)$/)
+  if (!match) {
+    throw new GhdError("INVALID_ARGS", `Not a GitHub remote: ${url}`)
   }
-  const [owner, repo, issueStr] = parts
-  const issue = Number(issueStr)
-  if (!owner || !repo || !Number.isFinite(issue) || issue < 1) {
-    throw new GhdError("INVALID_ARGS", "Target must be owner/repo/issue")
-  }
-  return { owner, repo, issue }
+  return { owner: match[1], repo: match[2] }
 }
 
-const targetInput = v.pipe(v.string(), v.description("owner/repo/issue"))
+// Infer owner/repo from GHD_REPO env var or git remote origin
+async function inferRepo(): Promise<{ owner: string; repo: string }> {
+  const env = process.env.GHD_REPO
+  if (env) {
+    const parts = env.split("/")
+    if (parts.length === 2 && parts[0] && parts[1]) {
+      return { owner: parts[0], repo: parts[1] }
+    }
+    throw new GhdError("INVALID_ARGS", `Invalid GHD_REPO="${env}". Expected owner/repo.`)
+  }
+
+  const proc = Bun.spawn(["git", "remote", "get-url", "origin"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const stdout = (await new Response(proc.stdout).text()).trim()
+  if ((await proc.exited) !== 0 || !stdout) {
+    throw new GhdError("INVALID_ARGS", "Not in a git repo with a remote. Use owner/repo/issue or set GHD_REPO.")
+  }
+  return parseGitHubRemote(stdout)
+}
+
+// Resolve target: "42" (auto-detect repo) or "owner/repo/42" (fully qualified)
+async function resolveTarget(target: string): Promise<{ owner: string; repo: string; issue: number }> {
+  const parts = target.split("/")
+  if (parts.length === 3) {
+    const [owner, repo, issueStr] = parts
+    const issue = Number(issueStr)
+    if (!owner || !repo || !Number.isFinite(issue) || issue < 1) {
+      throw new GhdError("INVALID_ARGS", "Invalid target. Use issue number or owner/repo/issue.")
+    }
+    return { owner, repo, issue }
+  }
+  if (parts.length === 1) {
+    const issue = Number(target)
+    if (Number.isFinite(issue) && issue >= 1) {
+      const { owner, repo } = await inferRepo()
+      return { owner, repo, issue }
+    }
+  }
+  throw new GhdError("INVALID_ARGS", "Invalid target. Use issue number or owner/repo/issue.")
+}
+
+const targetInput = v.pipe(v.string(), v.description("issue number or owner/repo/issue"))
 
 const schema = {
   start: c
     .meta({
       description: "Start or join a discussion session",
       examples: [
-        "ghd start acme/api/42 --as claude --role Architect",
+        "ghd start 42 --as claude --role Architect",
         'ghd start acme/api --as claude --title "Bug report" --body "Details..."',
       ],
     })
     .args("target")
     .input(s(v.object({
-      target: v.pipe(v.string(), v.description("owner/repo/issue (join) or owner/repo (create)")),
+      target: v.pipe(v.string(), v.description("issue number or owner/repo/issue (join) · owner/repo (create)")),
       as: v.pipe(v.string(), v.minLength(1), v.description("Agent name")),
       role: v.optional(v.pipe(v.string(), v.minLength(1), v.description("Agent role"))),
       title: v.optional(v.pipe(v.string(), v.minLength(1), v.description("Issue title (create mode)"))),
@@ -52,8 +91,8 @@ const schema = {
     .meta({
       description: "Send a message (local-first, best-effort GitHub sync)",
       examples: [
-        'ghd send acme/api/42 --as claude --message "Proposal: ..."',
-        "ghd send acme/api/42 --as claude --message 'Done.' --wait",
+        'ghd send 42 --as claude --message "Proposal: ..."',
+        "ghd send 42 --as claude --message 'Done.' --wait",
       ],
     })
     .args("target")
@@ -68,7 +107,7 @@ const schema = {
   recv: c
     .meta({
       description: "Receive new messages (cursor-based incremental read)",
-      examples: ["ghd recv acme/api/42 --as claude"],
+      examples: ["ghd recv 42 --as claude"],
     })
     .args("target")
     .input(s(v.object({
@@ -79,7 +118,7 @@ const schema = {
   wait: c
     .meta({
       description: "Block until another agent sends a message",
-      examples: ["ghd wait acme/api/42 --as claude", "ghd wait acme/api/42 --as claude --timeout 120"],
+      examples: ["ghd wait 42 --as claude", "ghd wait 42 --as claude --timeout 120"],
     })
     .args("target")
     .input(s(v.object({
@@ -91,7 +130,7 @@ const schema = {
   log: c
     .meta({
       description: "View all messages (debug/review, no cursor interaction)",
-      examples: ["ghd log acme/api/42", "ghd log acme/api/42 --last 5"],
+      examples: ["ghd log 42", "ghd log 42 --last 5"],
     })
     .args("target")
     .input(s(v.object({
@@ -146,8 +185,8 @@ function waitForMessage(
   })
 }
 
-function resolveSession(target: string) {
-  const { owner, repo, issue } = parseTarget(target)
+async function resolveSession(target: string) {
+  const { owner, repo, issue } = await resolveTarget(target)
   return findSession(owner, repo, issue)
 }
 
@@ -156,10 +195,10 @@ app.run({
     start: async ({ input }) => {
       const parts = input.target.split("/")
       if (parts.length === 2) {
-        // Create mode
+        // Create mode: owner/repo
         const [owner, repo] = parts
         if (!owner || !repo) {
-          throw new GhdError("INVALID_ARGS", "Target must be owner/repo or owner/repo/issue")
+          throw new GhdError("INVALID_ARGS", "Target must be owner/repo, issue number, or owner/repo/issue")
         }
         if (!input.title) {
           throw new GhdError("INVALID_ARGS", "Create mode requires --title")
@@ -180,8 +219,8 @@ app.run({
         return
       }
 
-      // Join mode
-      const { owner, repo, issue } = parseTarget(input.target)
+      // Join mode: issue number or owner/repo/issue
+      const { owner, repo, issue } = await resolveTarget(input.target)
       const ghIssue = await fetchIssue(owner, repo, issue)
       const comments = await fetchComments(owner, repo, issue)
       const parsed = comments.map((c) => toParsedComment(c, false))
@@ -219,7 +258,7 @@ app.run({
     },
 
     send: async ({ input }) => {
-      const { dir, meta } = resolveSession(input.target)
+      const { dir, meta } = await resolveSession(input.target)
 
       // Register or update agent
       if (!meta.agents[input.as]) {
@@ -280,8 +319,8 @@ app.run({
       }
     },
 
-    recv: ({ input }) => {
-      const { dir, meta } = resolveSession(input.target)
+    recv: async ({ input }) => {
+      const { dir, meta } = await resolveSession(input.target)
 
       if (!meta.agents[input.as]) {
         meta.agents[input.as] = { role: null, cursor: 0 }
@@ -301,7 +340,7 @@ app.run({
     },
 
     wait: async ({ input }) => {
-      const { dir, meta } = resolveSession(input.target)
+      const { dir, meta } = await resolveSession(input.target)
 
       if (!meta.agents[input.as]) {
         meta.agents[input.as] = { role: null, cursor: 0 }
@@ -322,8 +361,8 @@ app.run({
       }
     },
 
-    log: ({ input }) => {
-      const { dir } = resolveSession(input.target)
+    log: async ({ input }) => {
+      const { dir } = await resolveSession(input.target)
       const msgDir = messagesDir(dir)
       let msgs = readAllMessages(msgDir)
       if (input.last !== undefined) {
@@ -332,8 +371,8 @@ app.run({
       console.log(formatMessages(msgs, false))
     },
 
-    status: ({ input }) => {
-      const { meta } = resolveSession(input.target)
+    status: async ({ input }) => {
+      const { meta } = await resolveSession(input.target)
       console.log(formatSession(meta))
     },
   },

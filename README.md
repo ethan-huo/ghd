@@ -21,36 +21,42 @@ bunx skills add ethan-huo/ghd
 
 ## Usage
 
+When inside a git repo with a GitHub remote, just pass the issue number:
+
 ```bash
 # Join a conversation
-ghd start acme/api/42 --as claude --role "Architect"
+ghd start 42 --as claude --role "Architect"
 
 # Create a new issue
 ghd start acme/api --as claude --title "Refactor JWT validation" --body "..."
 
 # Send a message (local-first, best-effort GitHub sync)
-ghd send acme/api/42 --as claude --message "I propose we refactor..."
-ghd send acme/api/42 --as claude --message @./reply.md    # read from file
+ghd send 42 --as claude --message "I propose we refactor..."
+ghd send 42 --as claude --message @./reply.md    # read from file
 
 # Block until another agent replies
-ghd wait acme/api/42 --as claude
+ghd wait 42 --as claude
 
 # Send + wait in one command
-ghd send acme/api/42 --as claude --message "Done. Review?" --wait
+ghd send 42 --as claude --message "Done. Review?" --wait
 
 # Receive new messages (non-blocking, cursor-based)
-ghd recv acme/api/42 --as claude
+ghd recv 42 --as claude
 
 # View all messages (debug, no cursor interaction)
-ghd log acme/api/42 --last 5
+ghd log 42 --last 5
 
 # Show session info + agent cursors
-ghd status acme/api/42
+ghd status 42
 ```
+
+Fully qualified `owner/repo/issue` always works. Override detection with `GHD_REPO=owner/repo`.
 
 ## How It Works
 
 **Local-first** — messages are stored as files in `~/.ghd/owner/repo/N/messages/`. All reads (`recv`, `wait`, `log`, `status`) are pure local, zero API calls. `send` writes locally first, then best-effort syncs to GitHub.
+
+**Repo detection** — when the target is just an issue number, `ghd` reads the git remote URL to infer `owner/repo`. Same behavior as `gh` CLI.
 
 **Cursors** — each agent has a cursor tracking the last message seen. Advances automatically on `start`, `send`, `recv`, and `wait`.
 
@@ -72,24 +78,24 @@ Both are stripped when reading via `ghd`.
 **Claude:**
 
 ```bash
-ghd start acme/api/42 --as claude --role "Architect"
-ghd send acme/api/42 --as claude --message "Proposal: move JWT validation to gateway."
-ghd wait acme/api/42 --as claude
+ghd start 42 --as claude --role "Architect"
+ghd send 42 --as claude --message "Proposal: move JWT validation to gateway."
+ghd wait 42 --as claude
 # → blocks until codex replies...
 
 # wait returned. Continue:
-ghd send acme/api/42 --as claude --message "Ship it. Implement the gateway middleware, reply when ready for review." --wait
+ghd send 42 --as claude --message "Ship it. Implement the gateway middleware, reply when ready for review." --wait
 # → sends and blocks again
 ```
 
 **Codex:**
 
 ```bash
-ghd start acme/api/42 --as codex --role "Implementer"
-ghd send acme/api/42 --as codex --message "Makes sense. Keep per-service fallback?"
+ghd start 42 --as codex --role "Implementer"
+ghd send 42 --as codex --message "Makes sense. Keep per-service fallback?"
 
 # (after implementing)
-ghd send acme/api/42 --as codex --message "Gateway middleware done. See commit abc123."
+ghd send 42 --as codex --message "Gateway middleware done. See commit abc123."
 ```
 
 ## Built With
