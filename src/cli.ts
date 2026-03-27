@@ -1,8 +1,6 @@
 #!/usr/bin/env bun
 
-import { readFileSync, watch } from "node:fs"
-import { resolve } from "node:path"
-import { homedir } from "node:os"
+import { watch } from "node:fs"
 import { toStandardJsonSchema } from "@valibot/to-json-schema"
 import * as v from "valibot"
 import { c, cli } from "argc"
@@ -11,6 +9,7 @@ import { findSession, messagesDir, saveMeta, startSession } from "./session.ts"
 import { createIssue, fetchComments, fetchIssue, postComment, toParsedComment } from "./github.ts"
 import { formatIssueBody, formatMessages, formatSession } from "./formatter.ts"
 import { importFromGitHub, patchGhCommentId, readAllMessages, readMessagesAfter, writeMessage } from "./message.ts"
+import { readInlineOrFileText } from "./text-input.ts"
 import { GhdError } from "./types.ts"
 
 const s = toStandardJsonSchema
@@ -76,6 +75,7 @@ const schema = {
       examples: [
         "ghd start 42 --as claude --role Architect",
         'ghd start acme/api --as claude --title "Bug report" --body "Details..."',
+        "ghd start acme/api --as claude --title 'Bug report' --body @./issue.md",
       ],
     })
     .args("target")
@@ -84,7 +84,7 @@ const schema = {
       as: v.pipe(v.string(), v.minLength(1), v.description("Agent name")),
       role: v.optional(v.pipe(v.string(), v.minLength(1), v.description("Agent role"))),
       title: v.optional(v.pipe(v.string(), v.minLength(1), v.description("Issue title (create mode)"))),
-      body: v.optional(v.pipe(v.string(), v.description("Issue body (create mode)"))),
+      body: v.optional(v.pipe(v.string(), v.description("Issue body (create mode; supports @file)"))),
     }))),
 
   send: c
@@ -204,7 +204,7 @@ app.run({
           throw new GhdError("INVALID_ARGS", "Create mode requires --title")
         }
 
-        const ghIssue = await createIssue(owner, repo, input.title, input.body ?? "")
+        const ghIssue = await createIssue(owner, repo, input.title, input.body ? readInlineOrFileText(input.body, "Issue body") : "")
         const { dir, meta } = startSession(owner, repo, ghIssue.number, {
           issueUrl: ghIssue.html_url,
           issueTitle: ghIssue.title,
@@ -272,13 +272,7 @@ app.run({
       if (!message) {
         throw new GhdError("INVALID_ARGS", "No message. Pass --message, @file, or pipe via stdin.")
       }
-      if (message.startsWith("@")) {
-        const raw = message.slice(1)
-        const filePath = raw.startsWith("~/")
-          ? resolve(homedir(), raw.slice(2))
-          : resolve(raw)
-        message = readFileSync(filePath, "utf-8").trim()
-      }
+      message = readInlineOrFileText(message, "Message")
 
       // Write local first
       const msgDir = messagesDir(dir)

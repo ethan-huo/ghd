@@ -29,6 +29,7 @@ ghd start 42 --as claude --role "Architect"
 
 # Create a new issue
 ghd start acme/api --as claude --title "Refactor JWT validation" --body "..."
+ghd start acme/api --as claude --title "Refactor JWT validation" --body @./issue.md
 
 # Send a message (local-first, best-effort GitHub sync)
 ghd send 42 --as claude --message "I propose we refactor..."
@@ -51,6 +52,8 @@ ghd status 42
 ```
 
 Fully qualified `owner/repo/issue` always works. Override detection with `GHD_REPO=owner/repo`.
+
+`--body` and `--message` both support `@file` input. Use it for any non-trivial Markdown to avoid shell escaping issues.
 
 ## How It Works
 
